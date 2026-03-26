@@ -62,6 +62,27 @@ function withProjectValidation(
   return null
 }
 
+function hasDuplicateTask(
+  tasks: Task[],
+  description: string,
+  projectId: ID,
+  taskDate: string,
+  ignoreTaskId?: ID,
+): boolean {
+  const normalizedDescription = description.trim().toLowerCase()
+  return tasks.some((task) => {
+    if (ignoreTaskId && task.id === ignoreTaskId) {
+      return false
+    }
+
+    return (
+      task.projectId === projectId &&
+      task.taskDate === taskDate &&
+      task.description.trim().toLowerCase() === normalizedDescription
+    )
+  })
+}
+
 function persistCurrent(state: TimesheetState): void {
   saveSnapshot({
     projects: state.projects,
@@ -236,6 +257,12 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         return 'Task description is required.'
       }
 
+      if (
+        hasDuplicateTask(get().tasks, description, input.projectId, input.taskDate)
+      ) {
+        return 'A matching task already exists for this project and date.'
+      }
+
       const validationError = withProjectValidation(
         get().projects,
         input.projectId,
@@ -287,6 +314,18 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       const description = update.description.trim()
       if (!description) {
         return 'Task description is required.'
+      }
+
+      if (
+        hasDuplicateTask(
+          get().tasks,
+          description,
+          update.projectId,
+          update.taskDate,
+          taskId,
+        )
+      ) {
+        return 'A matching task already exists for this project and date.'
       }
 
       const validationError = withProjectValidation(
