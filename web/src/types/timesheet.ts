@@ -24,4 +24,7 @@ export interface TimesheetSnapshot {
   tasks: Task[]
   activeTimerTaskId: ID | null
   activeTimerStartedAt: number | null
+  recoveryTaskId: ID | null
+  recoveryElapsedMs: number | null
+  recoveryBaseTotalMs: number | null
 }

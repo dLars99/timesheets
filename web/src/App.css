@@ -73,6 +73,12 @@ h1 {
   align-items: center;
 }
 
+.recovery-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .view-toggle {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -156,6 +162,12 @@ button {
   border-radius: 10px;
   padding: 0.58rem 0.8rem;
   cursor: pointer;
+}
+
+.secondary-button {
+  background: #fff;
+  color: #743c00;
+  border-color: #f0b87b;
 }
 
 button:disabled {
@@ -316,6 +328,18 @@ button:disabled {
 .empty-state {
   margin: 0;
   color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .hero,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recovery-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 860px) {

@@ -12,9 +12,8 @@ function App() {
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
   const activeTimerTaskId = useTimesheetStore((state) => state.activeTimerTaskId)
   const recoveryMessage = useTimesheetStore((state) => state.recoveryMessage)
-  const clearRecoveryMessage = useTimesheetStore(
-    (state) => state.clearRecoveryMessage,
-  )
+  const confirmRecovery = useTimesheetStore((state) => state.confirmRecovery)
+  const discardRecovery = useTimesheetStore((state) => state.discardRecovery)
   const tasks = useTimesheetStore((state) => state.tasks)
   const [activeView, setActiveView] = useState<'today' | 'report'>('today')
 
@@ -111,7 +110,14 @@ function App() {
       {recoveryMessage && (
         <aside className="recovery-banner">
           <span>{recoveryMessage}</span>
-          <button onClick={clearRecoveryMessage}>Dismiss</button>
+          <div className="recovery-actions">
+            <button type="button" className="secondary-button" onClick={() => void discardRecovery()}>
+              Discard recovered time
+            </button>
+            <button type="button" onClick={() => void confirmRecovery()}>
+              Keep recovered time
+            </button>
+          </div>
         </aside>
       )}
 

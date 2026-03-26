@@ -38,6 +38,9 @@ struct PersistedSnapshot {
   tasks: Vec<PersistedTask>,
   active_timer_task_id: Option<String>,
   active_timer_started_at: Option<i64>,
+  recovery_task_id: Option<String>,
+  recovery_elapsed_ms: Option<i64>,
+  recovery_base_total_ms: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -174,8 +177,121 @@ fn init_db(conn: &Connection) -> Result<(), String> {
   Ok(())
 }
 
+fn current_timestamp_ms() -> i64 {
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map(|duration| duration.as_millis() as i64)
+    .unwrap_or(0)
+}
+
+fn current_timestamp_iso(conn: &Connection) -> Result<String, String> {
+  conn
+    .query_row(
+      "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+      [],
+      |row| row.get(0),
+    )
+    .map_err(|err| format!("failed to generate sqlite timestamp: {err}"))
+}
+
+fn recover_interrupted_timer(conn: &Connection) -> Result<(), String> {
+  let active_timer = conn.query_row(
+    "SELECT task_id, started_at, elapsed_ms FROM timers WHERE paused_at IS NULL LIMIT 1",
+    [],
+    |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, i64>(1)?,
+        row.get::<_, i64>(2)?,
+      ))
+    },
+  );
+
+  let (task_id, started_at, elapsed_ms) = match active_timer {
+    Ok(row) => row,
+    Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(()),
+    Err(err) => return Err(format!("failed to inspect active timer for recovery: {err}")),
+  };
+
+  let task_state: (i64, String) = conn
+    .query_row(
+      "SELECT total_ms, updated_at FROM tasks WHERE id = ?1",
+      [&task_id],
+      |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(|err| format!("failed to read task state for recovery: {err}"))?;
+
+  let base_total_ms = conn
+    .query_row(
+      "SELECT accumulated_time_ms FROM open_tasks WHERE task_id = ?1",
+      [&task_id],
+      |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(elapsed_ms.max(task_state.0));
+
+  let recovered_elapsed_ms = (current_timestamp_ms() - started_at).max(0);
+  let recovered_total_ms = base_total_ms + recovered_elapsed_ms;
+  let recovered_at = current_timestamp_iso(conn)?;
+
+  conn
+    .execute(
+      "UPDATE tasks SET total_ms = ?2, updated_at = ?3 WHERE id = ?1",
+      params![task_id, recovered_total_ms, recovered_at],
+    )
+    .map_err(|err| format!("failed to update recovered task total: {err}"))?;
+
+  conn
+    .execute("DELETE FROM timers WHERE task_id = ?1", [&task_id])
+    .map_err(|err| format!("failed to clear recovered timer row: {err}"))?;
+
+  conn
+    .execute(
+      "INSERT INTO open_tasks (task_id, was_running, accumulated_time_ms, last_updated_at)
+       VALUES (?1, 1, ?2, ?3)
+       ON CONFLICT(task_id) DO UPDATE SET
+         was_running = 1,
+         accumulated_time_ms = excluded.accumulated_time_ms,
+         last_updated_at = excluded.last_updated_at",
+      params![task_id, base_total_ms, task_state.1],
+    )
+    .map_err(|err| format!("failed to persist recovery marker: {err}"))?;
+
+  Ok(())
+}
+
+fn load_pending_recovery(conn: &Connection) -> Result<(Option<String>, Option<i64>, Option<i64>), String> {
+  let pending = conn.query_row(
+    "SELECT ot.task_id, ot.accumulated_time_ms, t.total_ms
+     FROM open_tasks ot
+     JOIN tasks t ON t.id = ot.task_id
+     WHERE ot.was_running != 0
+     LIMIT 1",
+    [],
+    |row| {
+      Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, i64>(1)?,
+        row.get::<_, i64>(2)?,
+      ))
+    },
+  );
+
+  match pending {
+    Ok((task_id, base_total_ms, total_ms)) => Ok((
+      Some(task_id),
+      Some((total_ms - base_total_ms).max(0)),
+      Some(base_total_ms),
+    )),
+    Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None, None)),
+    Err(err) => Err(format!("failed to load pending recovery row: {err}")),
+  }
+}
+
 fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, String> {
   let conn = open_db(app)?;
+  recover_interrupted_timer(&conn)?;
 
   let mut project_stmt = conn
     .prepare(
@@ -241,11 +357,17 @@ fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, St
     Err(err) => return Err(format!("failed to load active timer row: {err}")),
   };
 
+  let (recovery_task_id, recovery_elapsed_ms, recovery_base_total_ms) =
+    load_pending_recovery(&conn)?;
+
   Ok(Some(PersistedSnapshot {
     projects,
     tasks,
     active_timer_task_id,
     active_timer_started_at,
+    recovery_task_id,
+    recovery_elapsed_ms,
+    recovery_base_total_ms,
   }))
 }
 
@@ -328,6 +450,23 @@ fn write_snapshot(app: &tauri::AppHandle, snapshot: &PersistedSnapshot) -> Resul
         params![task_id, active_task.total_ms, active_task.updated_at],
       )
       .map_err(|err| format!("failed to insert open task row: {err}"))?;
+  } else if let (Some(task_id), Some(base_total_ms)) = (
+    snapshot.recovery_task_id.as_ref(),
+    snapshot.recovery_base_total_ms,
+  ) {
+    let recovered_task = snapshot
+      .tasks
+      .iter()
+      .find(|task| task.id == *task_id)
+      .ok_or_else(|| "Recovery task not found in snapshot.".to_string())?;
+
+    tx
+      .execute(
+        "INSERT INTO open_tasks (task_id, was_running, accumulated_time_ms, last_updated_at)
+         VALUES (?1, 1, ?2, ?3)",
+        params![task_id, base_total_ms, recovered_task.updated_at],
+      )
+      .map_err(|err| format!("failed to persist pending recovery row: {err}"))?;
   }
 
   tx
@@ -570,6 +709,58 @@ fn pause_active_timer(
 }
 
 #[tauri::command]
+fn confirm_recovery(
+  app: tauri::AppHandle,
+  task_id: String,
+) -> Result<PersistedSnapshot, String> {
+  let conn = open_db(&app)?;
+
+  conn
+    .execute("DELETE FROM open_tasks WHERE task_id = ?1", [&task_id])
+    .map_err(|err| format!("failed to clear recovery marker: {err}"))?;
+
+  load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())
+}
+
+#[tauri::command]
+fn discard_recovery(
+  app: tauri::AppHandle,
+  task_id: String,
+) -> Result<PersistedSnapshot, String> {
+  let mut conn = open_db(&app)?;
+  let tx = conn
+    .transaction()
+    .map_err(|err| format!("failed to open sqlite transaction: {err}"))?;
+
+  let base_total_ms = tx
+    .query_row(
+      "SELECT accumulated_time_ms FROM open_tasks WHERE task_id = ?1 AND was_running != 0",
+      [&task_id],
+      |row| row.get::<_, i64>(0),
+    )
+    .map_err(|_| "Recovery task not found.".to_string())?;
+
+  let updated_at = current_timestamp_iso(&tx)?;
+
+  tx
+    .execute(
+      "UPDATE tasks SET total_ms = ?2, updated_at = ?3 WHERE id = ?1",
+      params![task_id, base_total_ms, updated_at],
+    )
+    .map_err(|err| format!("failed to revert recovered task total: {err}"))?;
+
+  tx
+    .execute("DELETE FROM open_tasks WHERE task_id = ?1", [&task_id])
+    .map_err(|err| format!("failed to delete recovery marker: {err}"))?;
+
+  tx
+    .commit()
+    .map_err(|err| format!("failed to commit recovery rollback: {err}"))?;
+
+  load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())
+}
+
+#[tauri::command]
 fn get_project_totals(
   app: tauri::AppHandle,
   start_date: String,
@@ -714,6 +905,8 @@ pub fn run() {
       add_time_to_task,
       start_timer,
       pause_active_timer,
+      confirm_recovery,
+      discard_recovery,
       get_project_totals,
       get_export_rows
     ])

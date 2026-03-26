@@ -8,7 +8,9 @@ import {
   addProjectRemote,
   addTaskRemote,
   addTimeToTaskRemote,
+  confirmRecoveryRemote,
   deleteTaskRemote,
+  discardRecoveryRemote,
   isDesktopApp,
   pauseActiveTimerRemote,
   startTimerRemote,
@@ -46,13 +48,29 @@ interface TimesheetState extends TimesheetSnapshot {
   startTimer: (taskId: ID) => void
   pauseActiveTimer: () => void
   adjustTaskTime: (taskId: ID, totalMs: number) => void
-  clearRecoveryMessage: () => void
+  confirmRecovery: () => Promise<void>
+  discardRecovery: () => Promise<void>
   getRecentTasks: (limit?: number) => Task[]
 }
 
 function saveSnapshot(snapshot: TimesheetSnapshot): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
   void saveDesktopSnapshot(snapshot)
+}
+
+function recoveryMessageForSnapshot(snapshot: Pick<
+  TimesheetSnapshot,
+  'tasks' | 'recoveryTaskId' | 'recoveryElapsedMs'
+>): string | null {
+  if (!snapshot.recoveryTaskId || snapshot.recoveryElapsedMs === null) {
+    return null
+  }
+
+  const taskName =
+    snapshot.tasks.find((task) => task.id === snapshot.recoveryTaskId)?.description ??
+    'a task'
+
+  return `Recovered ${taskName} as paused from previous session.`
 }
 
 function withProjectValidation(
@@ -99,6 +117,9 @@ function persistCurrent(state: TimesheetState): void {
     tasks: state.tasks,
     activeTimerTaskId: state.activeTimerTaskId,
     activeTimerStartedAt: state.activeTimerStartedAt,
+    recoveryTaskId: state.recoveryTaskId,
+    recoveryElapsedMs: state.recoveryElapsedMs,
+    recoveryBaseTotalMs: state.recoveryBaseTotalMs,
   })
 }
 
@@ -108,6 +129,9 @@ function applySnapshotState(snapshot: TimesheetSnapshot) {
     tasks: snapshot.tasks,
     activeTimerTaskId: snapshot.activeTimerTaskId,
     activeTimerStartedAt: snapshot.activeTimerStartedAt,
+    recoveryTaskId: snapshot.recoveryTaskId,
+    recoveryElapsedMs: snapshot.recoveryElapsedMs,
+    recoveryBaseTotalMs: snapshot.recoveryBaseTotalMs,
   }
 }
 
@@ -117,6 +141,9 @@ function loadInitialState(): Pick<
   | 'tasks'
   | 'activeTimerTaskId'
   | 'activeTimerStartedAt'
+  | 'recoveryTaskId'
+  | 'recoveryElapsedMs'
+  | 'recoveryBaseTotalMs'
   | 'recoveryMessage'
   | 'isHydrated'
 > {
@@ -125,6 +152,9 @@ function loadInitialState(): Pick<
     tasks: [],
     activeTimerTaskId: null,
     activeTimerStartedAt: null,
+    recoveryTaskId: null,
+    recoveryElapsedMs: null,
+    recoveryBaseTotalMs: null,
     recoveryMessage: null,
     isHydrated: false,
   }
@@ -140,12 +170,26 @@ function loadInitialState(): Pick<
       return fallback
     }
 
+    if (parsed.recoveryTaskId && parsed.recoveryElapsedMs !== null) {
+      return {
+        projects: parsed.projects,
+        tasks: parsed.tasks,
+        activeTimerTaskId: null,
+        activeTimerStartedAt: null,
+        recoveryTaskId: parsed.recoveryTaskId,
+        recoveryElapsedMs: parsed.recoveryElapsedMs,
+        recoveryBaseTotalMs: parsed.recoveryBaseTotalMs ?? null,
+        recoveryMessage: recoveryMessageForSnapshot(parsed),
+        isHydrated: false,
+      }
+    }
+
     if (parsed.activeTimerTaskId && parsed.activeTimerStartedAt) {
       const now = Date.now()
       const elapsed = Math.max(0, now - parsed.activeTimerStartedAt)
-      const taskName =
-        parsed.tasks.find((task) => task.id === parsed.activeTimerTaskId)
-          ?.description ?? 'a task'
+      const recoveredTask = parsed.tasks.find(
+        (task) => task.id === parsed.activeTimerTaskId,
+      )
 
       const recoveredTasks = parsed.tasks.map((task) => {
         if (task.id !== parsed.activeTimerTaskId) {
@@ -164,7 +208,14 @@ function loadInitialState(): Pick<
         tasks: recoveredTasks,
         activeTimerTaskId: null,
         activeTimerStartedAt: null,
-        recoveryMessage: `Recovered ${taskName} as paused from previous session.`,
+        recoveryTaskId: parsed.activeTimerTaskId,
+        recoveryElapsedMs: elapsed,
+        recoveryBaseTotalMs: recoveredTask?.totalMs ?? null,
+        recoveryMessage: recoveryMessageForSnapshot({
+          tasks: recoveredTasks,
+          recoveryTaskId: parsed.activeTimerTaskId,
+          recoveryElapsedMs: elapsed,
+        }),
         isHydrated: false,
       }
     }
@@ -174,6 +225,9 @@ function loadInitialState(): Pick<
       tasks: parsed.tasks,
       activeTimerTaskId: null,
       activeTimerStartedAt: null,
+      recoveryTaskId: null,
+      recoveryElapsedMs: null,
+      recoveryBaseTotalMs: null,
       recoveryMessage: null,
       isHydrated: false,
     }
@@ -184,14 +238,34 @@ function loadInitialState(): Pick<
 
 function applyRecovery(snapshot: TimesheetSnapshot): Pick<
   TimesheetState,
-  'projects' | 'tasks' | 'activeTimerTaskId' | 'activeTimerStartedAt' | 'recoveryMessage'
+  | 'projects'
+  | 'tasks'
+  | 'activeTimerTaskId'
+  | 'activeTimerStartedAt'
+  | 'recoveryTaskId'
+  | 'recoveryElapsedMs'
+  | 'recoveryBaseTotalMs'
+  | 'recoveryMessage'
 > {
+  if (snapshot.recoveryTaskId && snapshot.recoveryElapsedMs !== null) {
+    return {
+      projects: snapshot.projects,
+      tasks: snapshot.tasks,
+      activeTimerTaskId: null,
+      activeTimerStartedAt: null,
+      recoveryTaskId: snapshot.recoveryTaskId,
+      recoveryElapsedMs: snapshot.recoveryElapsedMs,
+      recoveryBaseTotalMs: snapshot.recoveryBaseTotalMs,
+      recoveryMessage: recoveryMessageForSnapshot(snapshot),
+    }
+  }
+
   if (snapshot.activeTimerTaskId && snapshot.activeTimerStartedAt) {
     const now = Date.now()
     const elapsed = Math.max(0, now - snapshot.activeTimerStartedAt)
-    const taskName =
-      snapshot.tasks.find((task) => task.id === snapshot.activeTimerTaskId)
-        ?.description ?? 'a task'
+    const recoveredTask = snapshot.tasks.find(
+      (task) => task.id === snapshot.activeTimerTaskId,
+    )
 
     return {
       projects: snapshot.projects,
@@ -207,7 +281,23 @@ function applyRecovery(snapshot: TimesheetSnapshot): Pick<
       }),
       activeTimerTaskId: null,
       activeTimerStartedAt: null,
-      recoveryMessage: `Recovered ${taskName} as paused from previous session.`,
+      recoveryTaskId: snapshot.activeTimerTaskId,
+      recoveryElapsedMs: elapsed,
+      recoveryBaseTotalMs: recoveredTask?.totalMs ?? null,
+      recoveryMessage: recoveryMessageForSnapshot({
+        tasks: snapshot.tasks.map((task) => {
+          if (task.id !== snapshot.activeTimerTaskId) {
+            return task
+          }
+          return {
+            ...task,
+            totalMs: task.totalMs + elapsed,
+            updatedAt: new Date(now).toISOString(),
+          }
+        }),
+        recoveryTaskId: snapshot.activeTimerTaskId,
+        recoveryElapsedMs: elapsed,
+      }),
     }
   }
 
@@ -216,6 +306,9 @@ function applyRecovery(snapshot: TimesheetSnapshot): Pick<
     tasks: snapshot.tasks,
     activeTimerTaskId: null,
     activeTimerStartedAt: null,
+    recoveryTaskId: null,
+    recoveryElapsedMs: null,
+    recoveryBaseTotalMs: null,
     recoveryMessage: null,
   }
 }
@@ -239,6 +332,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         tasks: recovered.tasks,
         activeTimerTaskId: recovered.activeTimerTaskId,
         activeTimerStartedAt: recovered.activeTimerStartedAt,
+        recoveryTaskId: recovered.recoveryTaskId,
+        recoveryElapsedMs: recovered.recoveryElapsedMs,
+        recoveryBaseTotalMs: recovered.recoveryBaseTotalMs,
       })
     },
 
@@ -268,9 +364,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       if (isDesktopApp()) {
         try {
           const snapshot = await addProjectRemote(project)
-          set((state) => ({
+          set(() => ({
             ...applySnapshotState(snapshot),
-            recoveryMessage: state.recoveryMessage,
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
           }))
           saveSnapshot(snapshot)
           return null
@@ -320,9 +416,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       if (isDesktopApp()) {
         try {
           const snapshot = await addTaskRemote(task)
-          set((state) => ({
+          set(() => ({
             ...applySnapshotState(snapshot),
-            recoveryMessage: state.recoveryMessage,
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
           }))
           saveSnapshot(snapshot)
           return null
@@ -347,9 +443,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       if (isDesktopApp()) {
         try {
           const snapshot = await addTimeToTaskRemote(taskId, safeDelta, nowIso)
-          set((state) => ({
+          set(() => ({
             ...applySnapshotState(snapshot),
-            recoveryMessage: state.recoveryMessage,
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
           }))
           saveSnapshot(snapshot)
           return
@@ -419,9 +515,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
         try {
           const snapshot = await updateTaskRemote(nextTask)
-          set((state) => ({
+          set(() => ({
             ...applySnapshotState(snapshot),
-            recoveryMessage: state.recoveryMessage,
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
           }))
           saveSnapshot(snapshot)
           return null
@@ -456,9 +552,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       if (isDesktopApp()) {
         try {
           const snapshot = await deleteTaskRemote(taskId)
-          set((state) => ({
+          set(() => ({
             ...applySnapshotState(snapshot),
-            recoveryMessage: state.recoveryMessage,
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
           }))
           saveSnapshot(snapshot)
           return
@@ -486,9 +582,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
         void startTimerRemote(taskId, now, nowIso)
           .then((snapshot) => {
-            set((state) => ({
+            set(() => ({
               ...applySnapshotState(snapshot),
-              recoveryMessage: state.recoveryMessage,
+              recoveryMessage: recoveryMessageForSnapshot(snapshot),
             }))
             saveSnapshot(snapshot)
           })
@@ -523,9 +619,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
         void pauseActiveTimerRemote(now, nowIso)
           .then((snapshot) => {
-            set((state) => ({
+            set(() => ({
               ...applySnapshotState(snapshot),
-              recoveryMessage: state.recoveryMessage,
+              recoveryMessage: recoveryMessageForSnapshot(snapshot),
             }))
             saveSnapshot(snapshot)
           })
@@ -575,8 +671,71 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       persistCurrent(get())
     },
 
-    clearRecoveryMessage: () => {
-      set({ recoveryMessage: null })
+    confirmRecovery: async () => {
+      const { recoveryTaskId } = get()
+      if (!recoveryTaskId) {
+        return
+      }
+
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await confirmRecoveryRemote(recoveryTaskId)
+          set({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
+          })
+          saveSnapshot(snapshot)
+          return
+        } catch {
+          return
+        }
+      }
+
+      set({
+        recoveryTaskId: null,
+        recoveryElapsedMs: null,
+        recoveryBaseTotalMs: null,
+        recoveryMessage: null,
+      })
+      persistCurrent(get())
+    },
+
+    discardRecovery: async () => {
+      const { recoveryTaskId, recoveryElapsedMs } = get()
+      if (!recoveryTaskId || recoveryElapsedMs === null) {
+        return
+      }
+
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await discardRecoveryRemote(recoveryTaskId)
+          set({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
+          })
+          saveSnapshot(snapshot)
+          return
+        } catch {
+          return
+        }
+      }
+
+      set((state) => ({
+        tasks: state.tasks.map((task) =>
+          task.id === recoveryTaskId
+            ? {
+              ...task,
+              totalMs: Math.max(0, task.totalMs - recoveryElapsedMs),
+              updatedAt: new Date().toISOString(),
+            }
+            : task,
+        ),
+        recoveryTaskId: null,
+        recoveryElapsedMs: null,
+        recoveryBaseTotalMs: null,
+        recoveryMessage: null,
+      }))
+      persistCurrent(get())
     },
 
     getRecentTasks: (limit = 3) => {
@@ -591,6 +750,9 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
     tasks: initialState.tasks,
     activeTimerTaskId: initialState.activeTimerTaskId,
     activeTimerStartedAt: initialState.activeTimerStartedAt,
+    recoveryTaskId: initialState.recoveryTaskId,
+    recoveryElapsedMs: initialState.recoveryElapsedMs,
+    recoveryBaseTotalMs: initialState.recoveryBaseTotalMs,
   })
 
   return initialState

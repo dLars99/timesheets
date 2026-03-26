@@ -49,3 +49,15 @@ export async function pauseActiveTimerRemote(
 ): Promise<TimesheetSnapshot> {
   return invoke<TimesheetSnapshot>('pause_active_timer', { pausedAt, updatedAt })
 }
+
+export async function confirmRecoveryRemote(
+  taskId: ID,
+): Promise<TimesheetSnapshot> {
+  return invoke<TimesheetSnapshot>('confirm_recovery', { taskId })
+}
+
+export async function discardRecoveryRemote(
+  taskId: ID,
+): Promise<TimesheetSnapshot> {
+  return invoke<TimesheetSnapshot>('discard_recovery', { taskId })
+}
