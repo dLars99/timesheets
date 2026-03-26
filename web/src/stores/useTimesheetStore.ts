@@ -10,6 +10,8 @@ import {
   addTimeToTaskRemote,
   deleteTaskRemote,
   isDesktopApp,
+  pauseActiveTimerRemote,
+  startTimerRemote,
   updateTaskRemote,
 } from '../lib/taskIpc'
 import type { ID, Project, Task, TimesheetSnapshot } from '../types/timesheet'
@@ -477,6 +479,22 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
     },
 
     startTimer: (taskId) => {
+      if (isDesktopApp()) {
+        const now = Date.now()
+        const nowIso = new Date(now).toISOString()
+
+        void startTimerRemote(taskId, now, nowIso)
+          .then((snapshot) => {
+            set((state) => ({
+              ...applySnapshotState(snapshot),
+              recoveryMessage: state.recoveryMessage,
+            }))
+            saveSnapshot(snapshot)
+          })
+          .catch(() => undefined)
+        return
+      }
+
       const state = get()
       if (state.activeTimerTaskId === taskId) {
         return
@@ -498,6 +516,22 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
     },
 
     pauseActiveTimer: () => {
+      if (isDesktopApp()) {
+        const now = Date.now()
+        const nowIso = new Date(now).toISOString()
+
+        void pauseActiveTimerRemote(now, nowIso)
+          .then((snapshot) => {
+            set((state) => ({
+              ...applySnapshotState(snapshot),
+              recoveryMessage: state.recoveryMessage,
+            }))
+            saveSnapshot(snapshot)
+          })
+          .catch(() => undefined)
+        return
+      }
+
       const state = get()
       if (!state.activeTimerTaskId || !state.activeTimerStartedAt) {
         return

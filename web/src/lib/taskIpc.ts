@@ -29,3 +29,18 @@ export async function addTimeToTaskRemote(
 ): Promise<TimesheetSnapshot> {
   return invoke<TimesheetSnapshot>('add_time_to_task', { taskId, deltaMs })
 }
+
+export async function startTimerRemote(
+  taskId: ID,
+  startedAt: number,
+  updatedAt: string,
+): Promise<TimesheetSnapshot> {
+  return invoke<TimesheetSnapshot>('start_timer', { taskId, startedAt, updatedAt })
+}
+
+export async function pauseActiveTimerRemote(
+  pausedAt: number,
+  updatedAt: string,
+): Promise<TimesheetSnapshot> {
+  return invoke<TimesheetSnapshot>('pause_active_timer', { pausedAt, updatedAt })
+}

@@ -257,6 +257,80 @@ fn add_time_to_task(
 }
 
 #[tauri::command]
+fn start_timer(
+  app: tauri::AppHandle,
+  task_id: String,
+  started_at: i64,
+  updated_at: String,
+) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  if !snapshot.tasks.iter().any(|task| task.id == task_id) {
+    return Err("Task not found.".to_string());
+  }
+
+  if snapshot.active_timer_task_id.as_deref() == Some(task_id.as_str()) {
+    return Ok(snapshot);
+  }
+
+  if let (Some(active_task_id), Some(active_started_at)) = (
+    snapshot.active_timer_task_id.clone(),
+    snapshot.active_timer_started_at,
+  ) {
+    let elapsed = (started_at - active_started_at).max(0);
+    for task in snapshot.tasks.iter_mut() {
+      if task.id == active_task_id {
+        task.total_ms += elapsed;
+        task.updated_at = updated_at.clone();
+        break;
+      }
+    }
+  }
+
+  snapshot.active_timer_task_id = Some(task_id.clone());
+  snapshot.active_timer_started_at = Some(started_at);
+
+  for task in snapshot.tasks.iter_mut() {
+    if task.id == task_id {
+      task.updated_at = updated_at.clone();
+      break;
+    }
+  }
+
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
+fn pause_active_timer(
+  app: tauri::AppHandle,
+  paused_at: i64,
+  updated_at: String,
+) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  if let (Some(active_task_id), Some(active_started_at)) = (
+    snapshot.active_timer_task_id.clone(),
+    snapshot.active_timer_started_at,
+  ) {
+    let elapsed = (paused_at - active_started_at).max(0);
+    for task in snapshot.tasks.iter_mut() {
+      if task.id == active_task_id {
+        task.total_ms += elapsed;
+        task.updated_at = updated_at.clone();
+        break;
+      }
+    }
+  }
+
+  snapshot.active_timer_task_id = None;
+  snapshot.active_timer_started_at = None;
+
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
 fn get_project_totals(
   app: tauri::AppHandle,
   start_date: String,
@@ -399,6 +473,8 @@ pub fn run() {
       update_task,
       delete_task,
       add_time_to_task,
+      start_timer,
+      pause_active_timer,
       get_project_totals,
       get_export_rows
     ])
