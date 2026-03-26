@@ -8,6 +8,7 @@ import { TimerPanel } from './components/TimerPanel'
 import { useTimesheetStore } from './stores/useTimesheetStore'
 
 function App() {
+  const hydrate = useTimesheetStore((state) => state.hydrate)
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
   const recoveryMessage = useTimesheetStore((state) => state.recoveryMessage)
   const clearRecoveryMessage = useTimesheetStore(
@@ -15,6 +16,10 @@ function App() {
   )
   const tasks = useTimesheetStore((state) => state.tasks)
   const [activeView, setActiveView] = useState<'today' | 'report'>('today')
+
+  useEffect(() => {
+    void hydrate()
+  }, [hydrate])
 
   useEffect(() => {
     const onBeforeUnload = () => {

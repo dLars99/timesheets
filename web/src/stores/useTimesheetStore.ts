@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 import { DEFAULT_PROJECTS } from '../data/defaultProjects'
+import {
+  loadDesktopSnapshot,
+  saveDesktopSnapshot,
+} from '../lib/desktopPersistence'
 import type { ID, Project, Task, TimesheetSnapshot } from '../types/timesheet'
 
 const STORAGE_KEY = 'timesheets:state:v1'
@@ -21,6 +25,8 @@ interface TaskUpdate {
 
 interface TimesheetState extends TimesheetSnapshot {
   recoveryMessage: string | null
+  isHydrated: boolean
+  hydrate: () => Promise<void>
   addProject: (name: string, requiresTicket: boolean) => string | null
   addTask: (input: TaskInput) => string | null
   updateTask: (taskId: ID, update: TaskUpdate) => string | null
@@ -34,6 +40,7 @@ interface TimesheetState extends TimesheetSnapshot {
 
 function saveSnapshot(snapshot: TimesheetSnapshot): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+  void saveDesktopSnapshot(snapshot)
 }
 
 function withProjectValidation(
@@ -64,7 +71,12 @@ function persistCurrent(state: TimesheetState): void {
 
 function loadInitialState(): Pick<
   TimesheetState,
-  'projects' | 'tasks' | 'activeTimerTaskId' | 'activeTimerStartedAt' | 'recoveryMessage'
+  | 'projects'
+  | 'tasks'
+  | 'activeTimerTaskId'
+  | 'activeTimerStartedAt'
+  | 'recoveryMessage'
+  | 'isHydrated'
 > {
   const fallback = {
     projects: DEFAULT_PROJECTS,
@@ -72,6 +84,7 @@ function loadInitialState(): Pick<
     activeTimerTaskId: null,
     activeTimerStartedAt: null,
     recoveryMessage: null,
+    isHydrated: false,
   }
 
   const raw = localStorage.getItem(STORAGE_KEY)
@@ -110,6 +123,7 @@ function loadInitialState(): Pick<
         activeTimerTaskId: null,
         activeTimerStartedAt: null,
         recoveryMessage: `Recovered ${taskName} as paused from previous session.`,
+        isHydrated: false,
       }
     }
 
@@ -119,9 +133,48 @@ function loadInitialState(): Pick<
       activeTimerTaskId: null,
       activeTimerStartedAt: null,
       recoveryMessage: null,
+      isHydrated: false,
     }
   } catch {
     return fallback
+  }
+}
+
+function applyRecovery(snapshot: TimesheetSnapshot): Pick<
+  TimesheetState,
+  'projects' | 'tasks' | 'activeTimerTaskId' | 'activeTimerStartedAt' | 'recoveryMessage'
+> {
+  if (snapshot.activeTimerTaskId && snapshot.activeTimerStartedAt) {
+    const now = Date.now()
+    const elapsed = Math.max(0, now - snapshot.activeTimerStartedAt)
+    const taskName =
+      snapshot.tasks.find((task) => task.id === snapshot.activeTimerTaskId)
+        ?.description ?? 'a task'
+
+    return {
+      projects: snapshot.projects,
+      tasks: snapshot.tasks.map((task) => {
+        if (task.id !== snapshot.activeTimerTaskId) {
+          return task
+        }
+        return {
+          ...task,
+          totalMs: task.totalMs + elapsed,
+          updatedAt: new Date(now).toISOString(),
+        }
+      }),
+      activeTimerTaskId: null,
+      activeTimerStartedAt: null,
+      recoveryMessage: `Recovered ${taskName} as paused from previous session.`,
+    }
+  }
+
+  return {
+    projects: snapshot.projects,
+    tasks: snapshot.tasks,
+    activeTimerTaskId: null,
+    activeTimerStartedAt: null,
+    recoveryMessage: null,
   }
 }
 
@@ -130,6 +183,23 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
   const initialState: TimesheetState = {
     ...initial,
+    hydrate: async () => {
+      const remote = await loadDesktopSnapshot()
+      if (!remote) {
+        set({ isHydrated: true })
+        return
+      }
+
+      const recovered = applyRecovery(remote)
+      set({ ...recovered, isHydrated: true })
+      saveSnapshot({
+        projects: recovered.projects,
+        tasks: recovered.tasks,
+        activeTimerTaskId: recovered.activeTimerTaskId,
+        activeTimerStartedAt: recovered.activeTimerStartedAt,
+      })
+    },
+
     addProject: (name, requiresTicket) => {
       const trimmedName = name.trim()
       if (!trimmedName) {
@@ -295,10 +365,10 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         tasks: state.tasks.map((task) =>
           task.id === taskId
             ? {
-                ...task,
-                totalMs: Math.max(0, totalMs),
-                updatedAt: new Date().toISOString(),
-              }
+              ...task,
+              totalMs: Math.max(0, totalMs),
+              updatedAt: new Date().toISOString(),
+            }
             : task,
         ),
       }))
