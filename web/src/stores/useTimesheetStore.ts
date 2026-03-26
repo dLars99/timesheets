@@ -13,6 +13,7 @@ interface TaskInput {
   projectId: ID
   taskDate: string
   ticketNumber?: string
+  totalMs?: number
 }
 
 interface TaskUpdate {
@@ -29,6 +30,7 @@ interface TimesheetState extends TimesheetSnapshot {
   hydrate: () => Promise<void>
   addProject: (name: string, requiresTicket: boolean) => string | null
   addTask: (input: TaskInput) => string | null
+  addTimeToTask: (taskId: ID, deltaMs: number) => void
   updateTask: (taskId: ID, update: TaskUpdate) => string | null
   deleteTask: (taskId: ID) => void
   startTimer: (taskId: ID) => void
@@ -250,7 +252,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         projectId: input.projectId,
         taskDate: input.taskDate,
         ticketNumber: input.ticketNumber?.trim() || undefined,
-        totalMs: 0,
+        totalMs: Math.max(0, input.totalMs ?? 0),
         createdAt: now,
         updatedAt: now,
       }
@@ -258,6 +260,27 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       set((state) => ({ tasks: [...state.tasks, task] }))
       persistCurrent(get())
       return null
+    },
+
+    addTimeToTask: (taskId, deltaMs) => {
+      const safeDelta = Math.max(0, deltaMs)
+      if (safeDelta <= 0) {
+        return
+      }
+
+      const now = new Date().toISOString()
+      set((state) => ({
+        tasks: state.tasks.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                totalMs: task.totalMs + safeDelta,
+                updatedAt: now,
+              }
+            : task,
+        ),
+      }))
+      persistCurrent(get())
     },
 
     updateTask: (taskId, update) => {

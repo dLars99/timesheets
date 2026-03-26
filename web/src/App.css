@@ -169,6 +169,12 @@ button:disabled {
   gap: 0.5rem;
 }
 
+.toggle-row {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
 .checkbox-row input {
   margin: 0;
 }

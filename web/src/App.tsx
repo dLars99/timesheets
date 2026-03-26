@@ -10,6 +10,7 @@ import { useTimesheetStore } from './stores/useTimesheetStore'
 function App() {
   const hydrate = useTimesheetStore((state) => state.hydrate)
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
+  const activeTimerTaskId = useTimesheetStore((state) => state.activeTimerTaskId)
   const recoveryMessage = useTimesheetStore((state) => state.recoveryMessage)
   const clearRecoveryMessage = useTimesheetStore(
     (state) => state.clearRecoveryMessage,
@@ -22,15 +23,58 @@ function App() {
   }, [hydrate])
 
   useEffect(() => {
-    const onBeforeUnload = () => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!activeTimerTaskId) {
+        return undefined
+      }
+
       pauseActiveTimer()
+
+      const message = 'You have an active timer. Closing now will pause it.'
+      event.preventDefault()
+      event.returnValue = message
+      return message
     }
 
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload)
     }
-  }, [pauseActiveTimer])
+  }, [activeTimerTaskId, pauseActiveTimer])
+
+  useEffect(() => {
+    if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) {
+      return undefined
+    }
+
+    let unlisten: (() => void) | null = null
+
+    void (async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      unlisten = await getCurrentWindow().onCloseRequested((event) => {
+        if (!activeTimerTaskId) {
+          return
+        }
+
+        const shouldClose = window.confirm(
+          'A timer is currently running. Close the app and pause the timer?',
+        )
+
+        if (!shouldClose) {
+          event.preventDefault()
+          return
+        }
+
+        pauseActiveTimer()
+      })
+    })()
+
+    return () => {
+      if (unlisten) {
+        unlisten()
+      }
+    }
+  }, [activeTimerTaskId, pauseActiveTimer])
 
   const today = format(new Date(), 'yyyy-MM-dd')
   const todayTotalMs = useMemo(() => {
