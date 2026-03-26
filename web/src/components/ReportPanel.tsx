@@ -1,6 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { exportTasksToCsv } from '../lib/exportCsv'
+import { exportRowsToCsv, exportTasksToCsv } from '../lib/exportCsv'
+import {
+  fetchExportRows,
+  fetchProjectTotals,
+  type ProjectTotalRow,
+} from '../lib/reportingIpc'
 import { toDecimalHours } from '../lib/time'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
 
@@ -10,6 +15,9 @@ export function ReportPanel() {
   const defaultDate = format(new Date(), 'yyyy-MM-dd')
   const [startDate, setStartDate] = useState(defaultDate)
   const [endDate, setEndDate] = useState(defaultDate)
+  const [ipcTotals, setIpcTotals] = useState<ProjectTotalRow[] | null>(null)
+  const [loadingIpc, setLoadingIpc] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const filteredTasks = useMemo(
     () =>
@@ -18,6 +26,10 @@ export function ReportPanel() {
   )
 
   const totals = useMemo(() => {
+    if (ipcTotals) {
+      return ipcTotals
+    }
+
     const values = new Map<string, number>()
     for (const task of filteredTasks) {
       values.set(task.projectId, (values.get(task.projectId) ?? 0) + task.totalMs)
@@ -31,12 +43,56 @@ export function ReportPanel() {
         totalMs,
       }))
       .sort((a, b) => a.projectName.localeCompare(b.projectName))
-  }, [filteredTasks, projects])
+  }, [filteredTasks, ipcTotals, projects])
+
+  useEffect(() => {
+    if (startDate > endDate) {
+      setIpcTotals(null)
+      return
+    }
+
+    let cancelled = false
+    setLoadingIpc(true)
+
+    void fetchProjectTotals(startDate, endDate)
+      .then((rows) => {
+        if (cancelled) {
+          return
+        }
+        setIpcTotals(rows)
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingIpc(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [startDate, endDate, tasks])
 
   const totalHours = useMemo(
     () => toDecimalHours(filteredTasks.reduce((sum, task) => sum + task.totalMs, 0)),
     [filteredTasks],
   )
+
+  const handleExport = async () => {
+    if (startDate > endDate) {
+      return
+    }
+
+    setExporting(true)
+    const rows = await fetchExportRows(startDate, endDate)
+    if (rows) {
+      exportRowsToCsv(rows, startDate, endDate)
+      setExporting(false)
+      return
+    }
+
+    exportTasksToCsv(tasks, projects, startDate, endDate)
+    setExporting(false)
+  }
 
   return (
     <section className="report-panel">
@@ -58,16 +114,17 @@ export function ReportPanel() {
           />
         </label>
         <button
-          onClick={() => exportTasksToCsv(tasks, projects, startDate, endDate)}
+          onClick={handleExport}
           disabled={startDate > endDate}
         >
-          Export CSV
+          {exporting ? 'Exporting...' : 'Export CSV'}
         </button>
       </div>
 
       {startDate > endDate && (
         <p className="form-error">Start date must be before or equal to end date.</p>
       )}
+      {loadingIpc && <p className="empty-state">Refreshing totals...</p>}
 
       <table className="report-table">
         <thead>

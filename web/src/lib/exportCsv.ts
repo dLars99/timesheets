@@ -1,14 +1,25 @@
 import Papa from 'papaparse'
+import type { ExportCsvRow } from './reportingIpc'
 import type { Project, Task } from '../types/timesheet'
 import { toDecimalHours } from './time'
 
-interface ExportRow {
-  rowType: 'detail' | 'summary'
-  date: string
-  project: string
-  description: string
-  ticketNumber: string
-  hours: string
+function downloadCsv(rows: ExportCsvRow[], startDate: string, endDate: string): void {
+  const csv = Papa.unparse(rows)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `timesheets-${startDate}-to-${endDate}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+export function exportRowsToCsv(
+  rows: ExportCsvRow[],
+  startDate: string,
+  endDate: string,
+): void {
+  downloadCsv(rows, startDate, endDate)
 }
 
 export function exportTasksToCsv(
@@ -28,7 +39,7 @@ export function exportTasksToCsv(
       return a.taskDate.localeCompare(b.taskDate)
     })
 
-  const detailRows: ExportRow[] = inRange.map((task) => ({
+  const detailRows: ExportCsvRow[] = inRange.map((task) => ({
     rowType: 'detail',
     date: task.taskDate,
     project: projectById.get(task.projectId)?.name ?? 'Unknown',
@@ -42,7 +53,7 @@ export function exportTasksToCsv(
     totalsByProject.set(task.projectId, (totalsByProject.get(task.projectId) ?? 0) + task.totalMs)
   }
 
-  const summaryRows: ExportRow[] = Array.from(totalsByProject.entries())
+  const summaryRows: ExportCsvRow[] = Array.from(totalsByProject.entries())
     .sort((a, b) => {
       const aName = projectById.get(a[0])?.name ?? ''
       const bName = projectById.get(b[0])?.name ?? ''
@@ -57,12 +68,5 @@ export function exportTasksToCsv(
       hours: toDecimalHours(totalMs),
     }))
 
-  const csv = Papa.unparse([...detailRows, ...summaryRows])
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `timesheets-${startDate}-to-${endDate}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadCsv([...detailRows, ...summaryRows], startDate, endDate)
 }

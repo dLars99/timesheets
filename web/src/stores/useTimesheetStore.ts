@@ -273,10 +273,10 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         tasks: state.tasks.map((task) =>
           task.id === taskId
             ? {
-                ...task,
-                totalMs: task.totalMs + safeDelta,
-                updatedAt: now,
-              }
+              ...task,
+              totalMs: task.totalMs + safeDelta,
+              updatedAt: now,
+            }
             : task,
         ),
       }))
