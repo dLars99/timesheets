@@ -73,6 +73,30 @@ function recoveryMessageForSnapshot(snapshot: Pick<
   return `Recovered ${taskName} as paused from previous session.`
 }
 
+function toErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    const message = (error as { message: string }).message.trim()
+    if (message) {
+      return message
+    }
+  }
+
+  return fallback
+}
+
 function withProjectValidation(
   projects: Project[],
   projectId: ID,
@@ -371,7 +395,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
           saveSnapshot(snapshot)
           return null
         } catch (error) {
-          return error instanceof Error ? error.message : 'Failed to add project.'
+          return toErrorMessage(error, 'Failed to add project.')
         }
       }
 
@@ -423,7 +447,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
           saveSnapshot(snapshot)
           return null
         } catch (error) {
-          return error instanceof Error ? error.message : 'Failed to add task.'
+          return toErrorMessage(error, 'Failed to add task.')
         }
       }
 
@@ -522,7 +546,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
           saveSnapshot(snapshot)
           return null
         } catch (error) {
-          return error instanceof Error ? error.message : 'Failed to update task.'
+          return toErrorMessage(error, 'Failed to update task.')
         }
       }
 

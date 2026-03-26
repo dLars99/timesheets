@@ -158,11 +158,26 @@ fn init_db(conn: &Connection) -> Result<(), String> {
     .execute_batch("PRAGMA foreign_keys = ON;")
     .map_err(|err| format!("failed to enable sqlite foreign keys: {err}"))?;
 
+  // The initial migration SQL is reused for bootstrap, so make it idempotent
+  // for app restarts and existing local databases.
+  let init_sql_idempotent = INIT_SQL
+    .replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
+    .replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ");
+
   conn
-    .execute_batch(INIT_SQL)
+    .execute_batch(&init_sql_idempotent)
     .map_err(|err| format!("failed to initialize sqlite schema: {err}"))?;
 
   migrate_legacy_app_state(conn)?;
+
+  conn
+    .execute_batch(
+      "
+      DELETE FROM timers WHERE task_id NOT IN (SELECT id FROM tasks);
+      DELETE FROM open_tasks WHERE task_id NOT IN (SELECT id FROM tasks);
+      ",
+    )
+    .map_err(|err| format!("failed to cleanup orphan timer state: {err}"))?;
 
   let count: i64 = conn
     .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
@@ -266,7 +281,11 @@ fn load_pending_recovery(conn: &Connection) -> Result<(Option<String>, Option<i6
     "SELECT ot.task_id, ot.accumulated_time_ms, t.total_ms
      FROM open_tasks ot
      JOIN tasks t ON t.id = ot.task_id
+     LEFT JOIN timers tm
+       ON tm.task_id = ot.task_id
+      AND tm.paused_at IS NULL
      WHERE ot.was_running != 0
+       AND tm.task_id IS NULL
      LIMIT 1",
     [],
     |row| {
@@ -289,9 +308,14 @@ fn load_pending_recovery(conn: &Connection) -> Result<(Option<String>, Option<i6
   }
 }
 
-fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, String> {
+fn load_snapshot(
+  app: &tauri::AppHandle,
+  apply_interrupted_recovery: bool,
+) -> Result<Option<PersistedSnapshot>, String> {
   let conn = open_db(app)?;
-  recover_interrupted_timer(&conn)?;
+  if apply_interrupted_recovery {
+    recover_interrupted_timer(&conn)?;
+  }
 
   let mut project_stmt = conn
     .prepare(
@@ -346,7 +370,12 @@ fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, St
 
   let active_timer = conn
     .query_row(
-      "SELECT task_id, started_at FROM timers WHERE paused_at IS NULL LIMIT 1",
+      "SELECT timers.task_id, timers.started_at
+       FROM timers
+       JOIN tasks ON tasks.id = timers.task_id
+       WHERE timers.paused_at IS NULL
+       ORDER BY timers.started_at DESC
+       LIMIT 1",
       [],
       |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
     );
@@ -446,7 +475,7 @@ fn write_snapshot(app: &tauri::AppHandle, snapshot: &PersistedSnapshot) -> Resul
     tx
       .execute(
         "INSERT INTO open_tasks (task_id, was_running, accumulated_time_ms, last_updated_at)
-         VALUES (?1, 1, ?2, ?3)",
+         VALUES (?1, 0, ?2, ?3)",
         params![task_id, active_task.total_ms, active_task.updated_at],
       )
       .map_err(|err| format!("failed to insert open task row: {err}"))?;
@@ -520,7 +549,7 @@ fn validate_task_against_snapshot(
 
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<Option<String>, String> {
-  let snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let snapshot = load_snapshot(&app, true)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   let value = serde_json::to_string(&snapshot)
     .map_err(|err| format!("failed to serialize state JSON: {err}"))?;
@@ -541,7 +570,7 @@ fn add_project(
   app: tauri::AppHandle,
   project: PersistedProject,
 ) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   let name = project.name.trim().to_lowercase();
   if name.is_empty() {
@@ -563,7 +592,7 @@ fn add_project(
 
 #[tauri::command]
 fn add_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   validate_task_against_snapshot(&snapshot, &task, None)?;
 
@@ -574,7 +603,7 @@ fn add_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSnaps
 
 #[tauri::command]
 fn update_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   if !snapshot.tasks.iter().any(|current| current.id == task.id) {
     return Err("Task not found.".to_string());
@@ -600,7 +629,7 @@ fn update_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSn
 
 #[tauri::command]
 fn delete_task(app: tauri::AppHandle, task_id: String) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   snapshot.tasks.retain(|task| task.id != task_id);
   if snapshot.active_timer_task_id.as_deref() == Some(task_id.as_str()) {
@@ -619,7 +648,7 @@ fn add_time_to_task(
   delta_ms: i64,
   updated_at: String,
 ) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
   let safe_delta = delta_ms.max(0);
 
   for task in snapshot.tasks.iter_mut() {
@@ -641,7 +670,7 @@ fn start_timer(
   started_at: i64,
   updated_at: String,
 ) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   if !snapshot.tasks.iter().any(|task| task.id == task_id) {
     return Err("Task not found.".to_string());
@@ -685,7 +714,7 @@ fn pause_active_timer(
   paused_at: i64,
   updated_at: String,
 ) -> Result<PersistedSnapshot, String> {
-  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let mut snapshot = load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
   if let (Some(active_task_id), Some(active_started_at)) = (
     snapshot.active_timer_task_id.clone(),
@@ -719,7 +748,7 @@ fn confirm_recovery(
     .execute("DELETE FROM open_tasks WHERE task_id = ?1", [&task_id])
     .map_err(|err| format!("failed to clear recovery marker: {err}"))?;
 
-  load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())
+  load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())
 }
 
 #[tauri::command]
@@ -757,7 +786,7 @@ fn discard_recovery(
     .commit()
     .map_err(|err| format!("failed to commit recovery rollback: {err}"))?;
 
-  load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())
+  load_snapshot(&app, false)?.ok_or_else(|| "No state found on disk.".to_string())
 }
 
 #[tauri::command]
@@ -770,7 +799,7 @@ fn get_project_totals(
     return Err("start date must be before or equal to end date".to_string());
   }
 
-  let Some(snapshot) = load_snapshot(&app)? else {
+  let Some(snapshot) = load_snapshot(&app, false)? else {
     return Ok(Vec::new());
   };
 
@@ -818,7 +847,7 @@ fn get_export_rows(
     return Err("start date must be before or equal to end date".to_string());
   }
 
-  let Some(snapshot) = load_snapshot(&app)? else {
+  let Some(snapshot) = load_snapshot(&app, false)? else {
     return Ok(Vec::new());
   };
 
