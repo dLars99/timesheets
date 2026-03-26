@@ -1,8 +1,12 @@
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use tauri::Manager;
+
+const INIT_SQL: &str = include_str!("../../src/db/migrations/0001_init.sql");
+const SEED_PROJECTS_SQL: &str = include_str!("../../src/db/migrations/0002_seed_projects.sql");
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,28 +59,280 @@ struct ExportRow {
   hours: String,
 }
 
-fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, String> {
-  let path = state_file_path(app)?;
-  if !path.exists() {
-    return Ok(None);
+fn state_dir_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let app_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+
+  fs::create_dir_all(&app_dir)
+    .map_err(|err| format!("failed to create app data dir: {err}"))?;
+
+  Ok(app_dir)
+}
+
+fn sqlite_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  Ok(state_dir_path(app)?.join("timesheets.db"))
+}
+
+fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
+  let db_path = sqlite_file_path(app)?;
+  let conn = Connection::open(db_path)
+    .map_err(|err| format!("failed to open sqlite database: {err}"))?;
+  init_db(&conn)?;
+  Ok(conn)
+}
+
+fn table_exists(conn: &Connection, table_name: &str) -> Result<bool, String> {
+  let exists: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+      [table_name],
+      |row| row.get(0),
+    )
+    .map_err(|err| format!("failed to inspect sqlite schema: {err}"))?;
+
+  Ok(exists > 0)
+}
+
+fn migrate_legacy_app_state(conn: &Connection) -> Result<(), String> {
+  if !table_exists(conn, "app_state")? {
+    return Ok(());
   }
 
-  let value = fs::read_to_string(path)
-    .map_err(|err| format!("failed to read state file: {err}"))?;
+  let legacy_state = conn
+    .query_row(
+      "SELECT active_timer_task_id, active_timer_started_at FROM app_state WHERE id = 1",
+      [],
+      |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<i64>>(1)?)),
+    );
 
-  let snapshot: PersistedSnapshot = serde_json::from_str(&value)
-    .map_err(|err| format!("failed to parse state file JSON: {err}"))?;
+  if let Ok((Some(task_id), Some(started_at))) = legacy_state {
+    let task_exists: i64 = conn
+      .query_row(
+        "SELECT COUNT(*) FROM tasks WHERE id = ?1",
+        [&task_id],
+        |row| row.get(0),
+      )
+      .map_err(|err| format!("failed to validate legacy active timer task: {err}"))?;
 
-  Ok(Some(snapshot))
+    if task_exists > 0 {
+      let task_state: (i64, String) = conn
+        .query_row(
+          "SELECT total_ms, updated_at FROM tasks WHERE id = ?1",
+          [&task_id],
+          |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|err| format!("failed to read legacy task state: {err}"))?;
+
+      conn
+        .execute(
+          "INSERT OR REPLACE INTO timers (task_id, started_at, paused_at, elapsed_ms)
+           VALUES (?1, ?2, NULL, ?3)",
+          params![task_id, started_at, task_state.0],
+        )
+        .map_err(|err| format!("failed to migrate legacy timer row: {err}"))?;
+
+      conn
+        .execute(
+          "INSERT OR REPLACE INTO open_tasks (task_id, was_running, accumulated_time_ms, last_updated_at)
+           VALUES (?1, 1, ?2, ?3)",
+          params![task_id, task_state.0, task_state.1],
+        )
+        .map_err(|err| format!("failed to migrate legacy open task row: {err}"))?;
+    }
+  }
+
+  conn
+    .execute_batch("DROP TABLE IF EXISTS app_state;")
+    .map_err(|err| format!("failed to remove legacy app_state table: {err}"))?;
+
+  Ok(())
+}
+
+fn init_db(conn: &Connection) -> Result<(), String> {
+  conn
+    .execute_batch("PRAGMA foreign_keys = ON;")
+    .map_err(|err| format!("failed to enable sqlite foreign keys: {err}"))?;
+
+  conn
+    .execute_batch(INIT_SQL)
+    .map_err(|err| format!("failed to initialize sqlite schema: {err}"))?;
+
+  migrate_legacy_app_state(conn)?;
+
+  let count: i64 = conn
+    .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+    .map_err(|err| format!("failed to count projects: {err}"))?;
+
+  if count == 0 {
+    conn
+      .execute_batch(SEED_PROJECTS_SQL)
+      .map_err(|err| format!("failed to seed default projects: {err}"))?;
+  }
+
+  Ok(())
+}
+
+fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, String> {
+  let conn = open_db(app)?;
+
+  let mut project_stmt = conn
+    .prepare(
+      "SELECT id, name, requires_ticket, is_user_defined, created_at
+       FROM projects ORDER BY name",
+    )
+    .map_err(|err| format!("failed to prepare project query: {err}"))?;
+
+  let projects_iter = project_stmt
+    .query_map([], |row| {
+      Ok(PersistedProject {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        requires_ticket: row.get::<_, i64>(2)? != 0,
+        is_user_defined: row.get::<_, i64>(3)? != 0,
+        created_at: row.get(4)?,
+      })
+    })
+    .map_err(|err| format!("failed to load projects: {err}"))?;
+
+  let mut projects = Vec::new();
+  for project in projects_iter {
+    projects.push(project.map_err(|err| format!("failed to read project row: {err}"))?);
+  }
+
+  let mut task_stmt = conn
+    .prepare(
+      "SELECT id, project_id, description, task_date, total_ms, ticket_number, created_at, updated_at
+       FROM tasks ORDER BY task_date, updated_at",
+    )
+    .map_err(|err| format!("failed to prepare task query: {err}"))?;
+
+  let tasks_iter = task_stmt
+    .query_map([], |row| {
+      Ok(PersistedTask {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        description: row.get(2)?,
+        task_date: row.get(3)?,
+        total_ms: row.get(4)?,
+        ticket_number: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+      })
+    })
+    .map_err(|err| format!("failed to load tasks: {err}"))?;
+
+  let mut tasks = Vec::new();
+  for task in tasks_iter {
+    tasks.push(task.map_err(|err| format!("failed to read task row: {err}"))?);
+  }
+
+  let active_timer = conn
+    .query_row(
+      "SELECT task_id, started_at FROM timers WHERE paused_at IS NULL LIMIT 1",
+      [],
+      |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    );
+
+  let (active_timer_task_id, active_timer_started_at) = match active_timer {
+    Ok((task_id, started_at)) => (Some(task_id), Some(started_at)),
+    Err(rusqlite::Error::QueryReturnedNoRows) => (None, None),
+    Err(err) => return Err(format!("failed to load active timer row: {err}")),
+  };
+
+  Ok(Some(PersistedSnapshot {
+    projects,
+    tasks,
+    active_timer_task_id,
+    active_timer_started_at,
+  }))
 }
 
 fn write_snapshot(app: &tauri::AppHandle, snapshot: &PersistedSnapshot) -> Result<(), String> {
-  let path = state_file_path(app)?;
-  let payload = serde_json::to_string(snapshot)
-    .map_err(|err| format!("failed to serialize snapshot JSON: {err}"))?;
+  let mut conn = open_db(app)?;
+  let tx = conn
+    .transaction()
+    .map_err(|err| format!("failed to open sqlite transaction: {err}"))?;
 
-  fs::write(path, payload)
-    .map_err(|err| format!("failed to write state file: {err}"))?;
+  tx
+    .execute("DELETE FROM open_tasks", [])
+    .map_err(|err| format!("failed to clear open tasks: {err}"))?;
+  tx
+    .execute("DELETE FROM timers", [])
+    .map_err(|err| format!("failed to clear timers: {err}"))?;
+  tx
+    .execute("DELETE FROM tasks", [])
+    .map_err(|err| format!("failed to clear tasks: {err}"))?;
+  tx
+    .execute("DELETE FROM projects", [])
+    .map_err(|err| format!("failed to clear projects: {err}"))?;
+
+  for project in snapshot.projects.iter() {
+    tx
+      .execute(
+        "INSERT INTO projects (id, name, requires_ticket, is_user_defined, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+          project.id,
+          project.name,
+          if project.requires_ticket { 1_i64 } else { 0_i64 },
+          if project.is_user_defined { 1_i64 } else { 0_i64 },
+          project.created_at,
+        ],
+      )
+      .map_err(|err| format!("failed to insert project in transaction: {err}"))?;
+  }
+
+  for task in snapshot.tasks.iter() {
+    tx
+      .execute(
+        "INSERT INTO tasks (id, project_id, description, task_date, total_ms, ticket_number, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+          task.id,
+          task.project_id,
+          task.description,
+          task.task_date,
+          task.total_ms,
+          task.ticket_number,
+          task.created_at,
+          task.updated_at,
+        ],
+      )
+      .map_err(|err| format!("failed to insert task in transaction: {err}"))?;
+  }
+
+  if let (Some(task_id), Some(started_at)) = (
+    snapshot.active_timer_task_id.as_ref(),
+    snapshot.active_timer_started_at,
+  ) {
+    let active_task = snapshot
+      .tasks
+      .iter()
+      .find(|task| task.id == *task_id)
+      .ok_or_else(|| "Active timer task not found in snapshot.".to_string())?;
+
+    tx
+      .execute(
+        "INSERT INTO timers (task_id, started_at, paused_at, elapsed_ms)
+         VALUES (?1, ?2, NULL, ?3)",
+        params![task_id, started_at, active_task.total_ms],
+      )
+      .map_err(|err| format!("failed to insert active timer row: {err}"))?;
+
+    tx
+      .execute(
+        "INSERT INTO open_tasks (task_id, was_running, accumulated_time_ms, last_updated_at)
+         VALUES (?1, 1, ?2, ?3)",
+        params![task_id, active_task.total_ms, active_task.updated_at],
+      )
+      .map_err(|err| format!("failed to insert open task row: {err}"))?;
+  }
+
+  tx
+    .commit()
+    .map_err(|err| format!("failed to commit sqlite transaction: {err}"))?;
 
   Ok(())
 }
@@ -123,41 +379,22 @@ fn validate_task_against_snapshot(
   Ok(())
 }
 
-fn state_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-  let app_dir = app
-    .path()
-    .app_data_dir()
-    .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
-
-  fs::create_dir_all(&app_dir)
-    .map_err(|err| format!("failed to create app data dir: {err}"))?;
-
-  Ok(app_dir.join("timesheets-state.json"))
-}
-
 #[tauri::command]
 fn load_state(app: tauri::AppHandle) -> Result<Option<String>, String> {
-  let path = state_file_path(&app)?;
-  if !path.exists() {
-    return Ok(None);
-  }
+  let snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
 
-  let value = fs::read_to_string(path)
-    .map_err(|err| format!("failed to read state file: {err}"))?;
+  let value = serde_json::to_string(&snapshot)
+    .map_err(|err| format!("failed to serialize state JSON: {err}"))?;
 
   Ok(Some(value))
 }
 
 #[tauri::command]
 fn save_state(app: tauri::AppHandle, state_json: String) -> Result<(), String> {
-  serde_json::from_str::<serde_json::Value>(&state_json)
+  let snapshot = serde_json::from_str::<PersistedSnapshot>(&state_json)
     .map_err(|err| format!("state payload is not valid JSON: {err}"))?;
 
-  let path = state_file_path(&app)?;
-  fs::write(path, state_json)
-    .map_err(|err| format!("failed to write state file: {err}"))?;
-
-  Ok(())
+  write_snapshot(&app, &snapshot)
 }
 
 #[tauri::command]
@@ -241,6 +478,7 @@ fn add_time_to_task(
   app: tauri::AppHandle,
   task_id: String,
   delta_ms: i64,
+  updated_at: String,
 ) -> Result<PersistedSnapshot, String> {
   let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
   let safe_delta = delta_ms.max(0);
@@ -248,6 +486,7 @@ fn add_time_to_task(
   for task in snapshot.tasks.iter_mut() {
     if task.id == task_id {
       task.total_ms += safe_delta;
+      task.updated_at = updated_at.clone();
       write_snapshot(&app, &snapshot)?;
       return Ok(snapshot);
     }

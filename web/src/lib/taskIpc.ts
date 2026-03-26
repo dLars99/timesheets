@@ -26,8 +26,13 @@ export async function deleteTaskRemote(taskId: ID): Promise<TimesheetSnapshot> {
 export async function addTimeToTaskRemote(
   taskId: ID,
   deltaMs: number,
+  updatedAt: string,
 ): Promise<TimesheetSnapshot> {
-  return invoke<TimesheetSnapshot>('add_time_to_task', { taskId, deltaMs })
+  return invoke<TimesheetSnapshot>('add_time_to_task', {
+    taskId,
+    deltaMs,
+    updatedAt,
+  })
 }
 
 export async function startTimerRemote(

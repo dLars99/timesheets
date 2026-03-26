@@ -342,9 +342,11 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         return
       }
 
+      const nowIso = new Date().toISOString()
+
       if (isDesktopApp()) {
         try {
-          const snapshot = await addTimeToTaskRemote(taskId, safeDelta)
+          const snapshot = await addTimeToTaskRemote(taskId, safeDelta, nowIso)
           set((state) => ({
             ...applySnapshotState(snapshot),
             recoveryMessage: state.recoveryMessage,
@@ -356,14 +358,13 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         }
       }
 
-      const now = new Date().toISOString()
       set((state) => ({
         tasks: state.tasks.map((task) =>
           task.id === taskId
             ? {
               ...task,
               totalMs: task.totalMs + safeDelta,
-              updatedAt: now,
+              updatedAt: nowIso,
             }
             : task,
         ),
