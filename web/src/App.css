@@ -331,6 +331,7 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
+
   .hero,
   .workspace-grid {
     grid-template-columns: 1fr;
