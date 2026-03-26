@@ -67,11 +67,11 @@ export function TimerPanel() {
     [projects, interruptProjectId],
   )
 
-  const handleAddProject = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleAddProject = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setProjectError(null)
 
-    const error = addProject(projectName, requiresTicket)
+    const error = await addProject(projectName, requiresTicket)
     if (error) {
       setProjectError(error)
       return
@@ -81,7 +81,7 @@ export function TimerPanel() {
     setRequiresTicket(false)
   }
 
-  const handleLogInterruption = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setInterruptError(null)
 
@@ -102,11 +102,11 @@ export function TimerPanel() {
         setInterruptError('Select a task to log interruption time.')
         return
       }
-      addTimeToTask(targetTaskId, durationMs)
+      await addTimeToTask(targetTaskId, durationMs)
       return
     }
 
-    const result = addTask({
+    const result = await addTask({
       description: interruptDescription,
       projectId: interruptProjectId,
       taskDate: interruptDate,

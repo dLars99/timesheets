@@ -65,9 +65,9 @@ export function TaskList() {
                   </button>
                   <button
                     className="danger"
-                    onClick={() => {
+                    onClick={async () => {
                       if (window.confirm('Delete this task?')) {
-                        deleteTask(task.id)
+                        await deleteTask(task.id)
                       }
                     }}
                   >

@@ -1,32 +1,39 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedProject {
   id: String,
   name: String,
+  requires_ticket: bool,
+  is_user_defined: bool,
+  created_at: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedTask {
+  id: String,
   project_id: String,
   description: String,
   task_date: String,
   total_ms: i64,
   ticket_number: Option<String>,
+  created_at: String,
   updated_at: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedSnapshot {
   projects: Vec<PersistedProject>,
   tasks: Vec<PersistedTask>,
+  active_timer_task_id: Option<String>,
+  active_timer_started_at: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +68,59 @@ fn load_snapshot(app: &tauri::AppHandle) -> Result<Option<PersistedSnapshot>, St
     .map_err(|err| format!("failed to parse state file JSON: {err}"))?;
 
   Ok(Some(snapshot))
+}
+
+fn write_snapshot(app: &tauri::AppHandle, snapshot: &PersistedSnapshot) -> Result<(), String> {
+  let path = state_file_path(app)?;
+  let payload = serde_json::to_string(snapshot)
+    .map_err(|err| format!("failed to serialize snapshot JSON: {err}"))?;
+
+  fs::write(path, payload)
+    .map_err(|err| format!("failed to write state file: {err}"))?;
+
+  Ok(())
+}
+
+fn validate_task_against_snapshot(
+  snapshot: &PersistedSnapshot,
+  task: &PersistedTask,
+  ignore_task_id: Option<&str>,
+) -> Result<(), String> {
+  let project = snapshot
+    .projects
+    .iter()
+    .find(|project| project.id == task.project_id)
+    .ok_or_else(|| "Selected project no longer exists.".to_string())?;
+
+  if project.requires_ticket {
+    let ticket = task.ticket_number.as_deref().unwrap_or("").trim();
+    if ticket.is_empty() {
+      return Err(format!("{} requires a ticket number.", project.name));
+    }
+  }
+
+  let normalized = task.description.trim().to_lowercase();
+  if normalized.is_empty() {
+    return Err("Task description is required.".to_string());
+  }
+
+  let has_duplicate = snapshot.tasks.iter().any(|existing| {
+    if let Some(ignore_id) = ignore_task_id {
+      if existing.id == ignore_id {
+        return false;
+      }
+    }
+
+    existing.project_id == task.project_id
+      && existing.task_date == task.task_date
+      && existing.description.trim().to_lowercase() == normalized
+  });
+
+  if has_duplicate {
+    return Err("A matching task already exists for this project and date.".to_string());
+  }
+
+  Ok(())
 }
 
 fn state_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -98,6 +158,102 @@ fn save_state(app: tauri::AppHandle, state_json: String) -> Result<(), String> {
     .map_err(|err| format!("failed to write state file: {err}"))?;
 
   Ok(())
+}
+
+#[tauri::command]
+fn add_project(
+  app: tauri::AppHandle,
+  project: PersistedProject,
+) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  let name = project.name.trim().to_lowercase();
+  if name.is_empty() {
+    return Err("Project name is required.".to_string());
+  }
+
+  if snapshot
+    .projects
+    .iter()
+    .any(|existing| existing.name.trim().to_lowercase() == name)
+  {
+    return Err("Project already exists.".to_string());
+  }
+
+  snapshot.projects.push(project);
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
+fn add_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  validate_task_against_snapshot(&snapshot, &task, None)?;
+
+  snapshot.tasks.push(task);
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
+fn update_task(app: tauri::AppHandle, task: PersistedTask) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  if !snapshot.tasks.iter().any(|current| current.id == task.id) {
+    return Err("Task not found.".to_string());
+  }
+
+  validate_task_against_snapshot(&snapshot, &task, Some(task.id.as_str()))?;
+
+  snapshot.tasks = snapshot
+    .tasks
+    .into_iter()
+    .map(|current| {
+      if current.id == task.id {
+        task.clone()
+      } else {
+        current
+      }
+    })
+    .collect();
+
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
+fn delete_task(app: tauri::AppHandle, task_id: String) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+
+  snapshot.tasks.retain(|task| task.id != task_id);
+  if snapshot.active_timer_task_id.as_deref() == Some(task_id.as_str()) {
+    snapshot.active_timer_task_id = None;
+    snapshot.active_timer_started_at = None;
+  }
+
+  write_snapshot(&app, &snapshot)?;
+  Ok(snapshot)
+}
+
+#[tauri::command]
+fn add_time_to_task(
+  app: tauri::AppHandle,
+  task_id: String,
+  delta_ms: i64,
+) -> Result<PersistedSnapshot, String> {
+  let mut snapshot = load_snapshot(&app)?.ok_or_else(|| "No state found on disk.".to_string())?;
+  let safe_delta = delta_ms.max(0);
+
+  for task in snapshot.tasks.iter_mut() {
+    if task.id == task_id {
+      task.total_ms += safe_delta;
+      write_snapshot(&app, &snapshot)?;
+      return Ok(snapshot);
+    }
+  }
+
+  Err("Task not found.".to_string())
 }
 
 #[tauri::command]
@@ -238,6 +394,11 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       load_state,
       save_state,
+      add_project,
+      add_task,
+      update_task,
+      delete_task,
+      add_time_to_task,
       get_project_totals,
       get_export_rows
     ])

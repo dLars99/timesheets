@@ -31,13 +31,13 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
 
   const submitLabel = task ? 'Save Changes' : 'Create Task'
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
 
     if (task) {
       const parsedHours = Number(totalHours)
-      const result = updateTask(task.id, {
+      const result = await updateTask(task.id, {
         description,
         projectId,
         taskDate,
@@ -50,7 +50,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         return
       }
     } else {
-      const result = addTask({ description, projectId, taskDate, ticketNumber })
+      const result = await addTask({ description, projectId, taskDate, ticketNumber })
       if (result) {
         setError(result)
         return

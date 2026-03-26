@@ -4,6 +4,14 @@ import {
   loadDesktopSnapshot,
   saveDesktopSnapshot,
 } from '../lib/desktopPersistence'
+import {
+  addProjectRemote,
+  addTaskRemote,
+  addTimeToTaskRemote,
+  deleteTaskRemote,
+  isDesktopApp,
+  updateTaskRemote,
+} from '../lib/taskIpc'
 import type { ID, Project, Task, TimesheetSnapshot } from '../types/timesheet'
 
 const STORAGE_KEY = 'timesheets:state:v1'
@@ -28,11 +36,11 @@ interface TimesheetState extends TimesheetSnapshot {
   recoveryMessage: string | null
   isHydrated: boolean
   hydrate: () => Promise<void>
-  addProject: (name: string, requiresTicket: boolean) => string | null
-  addTask: (input: TaskInput) => string | null
-  addTimeToTask: (taskId: ID, deltaMs: number) => void
-  updateTask: (taskId: ID, update: TaskUpdate) => string | null
-  deleteTask: (taskId: ID) => void
+  addProject: (name: string, requiresTicket: boolean) => Promise<string | null>
+  addTask: (input: TaskInput) => Promise<string | null>
+  addTimeToTask: (taskId: ID, deltaMs: number) => Promise<void>
+  updateTask: (taskId: ID, update: TaskUpdate) => Promise<string | null>
+  deleteTask: (taskId: ID) => Promise<void>
   startTimer: (taskId: ID) => void
   pauseActiveTimer: () => void
   adjustTaskTime: (taskId: ID, totalMs: number) => void
@@ -90,6 +98,15 @@ function persistCurrent(state: TimesheetState): void {
     activeTimerTaskId: state.activeTimerTaskId,
     activeTimerStartedAt: state.activeTimerStartedAt,
   })
+}
+
+function applySnapshotState(snapshot: TimesheetSnapshot) {
+  return {
+    projects: snapshot.projects,
+    tasks: snapshot.tasks,
+    activeTimerTaskId: snapshot.activeTimerTaskId,
+    activeTimerStartedAt: snapshot.activeTimerStartedAt,
+  }
 }
 
 function loadInitialState(): Pick<
@@ -223,7 +240,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       })
     },
 
-    addProject: (name, requiresTicket) => {
+    addProject: async (name, requiresTicket) => {
       const trimmedName = name.trim()
       if (!trimmedName) {
         return 'Project name is required.'
@@ -246,12 +263,26 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         createdAt: now,
       }
 
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await addProjectRemote(project)
+          set((state) => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: state.recoveryMessage,
+          }))
+          saveSnapshot(snapshot)
+          return null
+        } catch (error) {
+          return error instanceof Error ? error.message : 'Failed to add project.'
+        }
+      }
+
       set((state) => ({ projects: [...state.projects, project] }))
       persistCurrent(get())
       return null
     },
 
-    addTask: (input) => {
+    addTask: async (input) => {
       const description = input.description.trim()
       if (!description) {
         return 'Task description is required.'
@@ -284,15 +315,43 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         updatedAt: now,
       }
 
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await addTaskRemote(task)
+          set((state) => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: state.recoveryMessage,
+          }))
+          saveSnapshot(snapshot)
+          return null
+        } catch (error) {
+          return error instanceof Error ? error.message : 'Failed to add task.'
+        }
+      }
+
       set((state) => ({ tasks: [...state.tasks, task] }))
       persistCurrent(get())
       return null
     },
 
-    addTimeToTask: (taskId, deltaMs) => {
+    addTimeToTask: async (taskId, deltaMs) => {
       const safeDelta = Math.max(0, deltaMs)
       if (safeDelta <= 0) {
         return
+      }
+
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await addTimeToTaskRemote(taskId, safeDelta)
+          set((state) => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: state.recoveryMessage,
+          }))
+          saveSnapshot(snapshot)
+          return
+        } catch {
+          return
+        }
       }
 
       const now = new Date().toISOString()
@@ -310,7 +369,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       persistCurrent(get())
     },
 
-    updateTask: (taskId, update) => {
+    updateTask: async (taskId, update) => {
       const description = update.description.trim()
       if (!description) {
         return 'Task description is required.'
@@ -338,6 +397,36 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       }
 
       const now = new Date().toISOString()
+
+      if (isDesktopApp()) {
+        const currentTask = get().tasks.find((task) => task.id === taskId)
+        if (!currentTask) {
+          return 'Task not found.'
+        }
+
+        const nextTask: Task = {
+          ...currentTask,
+          description,
+          projectId: update.projectId,
+          taskDate: update.taskDate,
+          ticketNumber: update.ticketNumber?.trim() || undefined,
+          totalMs: Math.max(0, update.totalMs),
+          updatedAt: now,
+        }
+
+        try {
+          const snapshot = await updateTaskRemote(nextTask)
+          set((state) => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: state.recoveryMessage,
+          }))
+          saveSnapshot(snapshot)
+          return null
+        } catch (error) {
+          return error instanceof Error ? error.message : 'Failed to update task.'
+        }
+      }
+
       set((state) => ({
         tasks: state.tasks.map((task) => {
           if (task.id !== taskId) {
@@ -360,7 +449,21 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       return null
     },
 
-    deleteTask: (taskId) => {
+    deleteTask: async (taskId) => {
+      if (isDesktopApp()) {
+        try {
+          const snapshot = await deleteTaskRemote(taskId)
+          set((state) => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: state.recoveryMessage,
+          }))
+          saveSnapshot(snapshot)
+          return
+        } catch {
+          return
+        }
+      }
+
       const current = get()
       const removingActive = current.activeTimerTaskId === taskId
 
