@@ -20,7 +20,9 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
   const startTimer = useTimesheetStore((state) => state.startTimer)
 
   const [description, setDescription] = useState(task?.description ?? '')
-  const [projectId, setProjectId] = useState(task?.projectId ?? projects[0]?.id ?? '')
+  const [projectId, setProjectId] = useState(
+    task?.projectId ?? projects[0]?.id ?? OTHER_PROJECT_ID,
+  )
   const [newProjectName, setNewProjectName] = useState('')
   const [newTaskMode, setNewTaskMode] = useState<NewTaskMode>('start-now')
   const [taskDate, setTaskDate] = useState(
@@ -181,7 +183,11 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
               {project.name}
             </option>
           ))}
-          {!task && <option value={OTHER_PROJECT_ID}>Other</option>}
+          {!task && (
+            <option value={OTHER_PROJECT_ID}>
+              {projects.length === 0 ? 'Add your first project' : 'Other'}
+            </option>
+          )}
         </select>
       </label>
 

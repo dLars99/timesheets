@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 const INIT_SQL: &str = include_str!("../../src/db/migrations/0001_init.sql");
-const SEED_PROJECTS_SQL: &str = include_str!("../../src/db/migrations/0002_seed_projects.sql");
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,16 +203,6 @@ fn init_db(conn: &Connection) -> Result<(), String> {
       ",
     )
     .map_err(|err| format!("failed to cleanup orphan timer state: {err}"))?;
-
-  let count: i64 = conn
-    .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
-    .map_err(|err| format!("failed to count projects: {err}"))?;
-
-  if count == 0 {
-    conn
-      .execute_batch(SEED_PROJECTS_SQL)
-      .map_err(|err| format!("failed to seed default projects: {err}"))?;
-  }
 
   Ok(())
 }

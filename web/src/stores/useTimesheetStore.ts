@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { DEFAULT_PROJECTS } from '../data/defaultProjects'
 import {
   loadDesktopSnapshot,
   saveDesktopSnapshot,
@@ -175,7 +174,7 @@ function loadInitialState(): Pick<
   | 'isHydrated'
 > {
   const fallback = {
-    projects: DEFAULT_PROJECTS,
+    projects: [],
     tasks: [],
     activeTimerTaskId: null,
     activeTimerStartedAt: null,
