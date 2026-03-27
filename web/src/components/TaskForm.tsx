@@ -176,7 +176,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
           value={ticketNumber}
           required={Boolean(selectedProject?.requiresTicket)}
           onChange={(event) => setTicketNumber(event.target.value)}
-          placeholder="ABC-123"
+          placeholder="123456"
         />
       </label>
 

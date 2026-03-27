@@ -13,16 +13,13 @@ export function TimerPanel() {
   const finishTask = useTimesheetStore((state) => state.finishTask)
   const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
   const addTask = useTimesheetStore((state) => state.addTask)
-  const addTimeToTask = useTimesheetStore((state) => state.addTimeToTask)
 
   const [tick, setTick] = useState(Date.now())
-  const [interruptMode, setInterruptMode] = useState<'new' | 'existing'>('new')
   const [interruptMinutes, setInterruptMinutes] = useState('5')
   const [interruptDate, setInterruptDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [interruptDescription, setInterruptDescription] = useState('Unexpected interruption')
   const [interruptProjectId, setInterruptProjectId] = useState('')
   const [interruptTicket, setInterruptTicket] = useState('')
-  const [targetTaskId, setTargetTaskId] = useState('')
   const [interruptError, setInterruptError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -48,20 +45,12 @@ export function TimerPanel() {
   }, [activeTask, activeTimerStartedAt, tick])
 
   const recentTasks = getRecentTasks(3)
-  const openTasks = useMemo(
-    () => tasks.filter((task) => !task.completedAt),
-    [tasks],
-  )
 
   useEffect(() => {
     if (!interruptProjectId && projects[0]) {
       setInterruptProjectId(projects[0].id)
     }
-
-    if (!targetTaskId && openTasks[0]) {
-      setTargetTaskId(openTasks[0].id)
-    }
-  }, [projects, openTasks, interruptProjectId, targetTaskId])
+  }, [projects, interruptProjectId])
 
   const interruptProject = useMemo(
     () => projects.find((project) => project.id === interruptProjectId),
@@ -81,16 +70,7 @@ export function TimerPanel() {
     const durationMs = minutes * 60000
 
     if (activeTask) {
-      pauseActiveTimer()
-    }
-
-    if (interruptMode === 'existing') {
-      if (!targetTaskId) {
-        setInterruptError('Select a task to log interruption time.')
-        return
-      }
-      await addTimeToTask(targetTaskId, durationMs)
-      return
+      await pauseActiveTimer()
     }
 
     const result = await addTask({
@@ -104,6 +84,20 @@ export function TimerPanel() {
     if (result) {
       setInterruptError(result)
       return
+    }
+
+    // New interruption tasks are immediately moved to history after logging.
+    const normalizedDescription = interruptDescription.trim().toLowerCase()
+    const createdTask = [...useTimesheetStore.getState().tasks]
+      .filter((task) =>
+        task.projectId === interruptProjectId &&
+        task.taskDate === interruptDate &&
+        task.description.trim().toLowerCase() === normalizedDescription,
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+
+    if (createdTask) {
+      await finishTask(createdTask.id)
     }
 
     setInterruptDescription('Unexpected interruption')
@@ -156,27 +150,6 @@ export function TimerPanel() {
       <form className="inline-form" onSubmit={handleLogInterruption}>
         <p className="label">Log Interruption</p>
 
-        <div className="toggle-row">
-          <label className="checkbox-row">
-            <input
-              type="radio"
-              name="interrupt-mode"
-              checked={interruptMode === 'new'}
-              onChange={() => setInterruptMode('new')}
-            />
-            New task
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="radio"
-              name="interrupt-mode"
-              checked={interruptMode === 'existing'}
-              onChange={() => setInterruptMode('existing')}
-            />
-            Existing task
-          </label>
-        </div>
-
         <label>
           Minutes
           <input
@@ -188,64 +161,46 @@ export function TimerPanel() {
           />
         </label>
 
-        {interruptMode === 'existing' ? (
-          <label>
-            Target Task
-            <select
-              value={targetTaskId}
-              onChange={(event) => setTargetTaskId(event.target.value)}
-            >
-              {openTasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.description}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <>
-            <label>
-              Description
-              <input
-                value={interruptDescription}
-                onChange={(event) => setInterruptDescription(event.target.value)}
-              />
-            </label>
+        <label>
+          Description
+          <input
+            value={interruptDescription}
+            onChange={(event) => setInterruptDescription(event.target.value)}
+          />
+        </label>
 
-            <label>
-              Project
-              <select
-                value={interruptProjectId}
-                onChange={(event) => setInterruptProjectId(event.target.value)}
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <label>
+          Project
+          <select
+            value={interruptProjectId}
+            onChange={(event) => setInterruptProjectId(event.target.value)}
+          >
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
 
-            <label>
-              Date
-              <input
-                type="date"
-                value={interruptDate}
-                onChange={(event) => setInterruptDate(event.target.value)}
-              />
-            </label>
+        <label>
+          Date
+          <input
+            type="date"
+            value={interruptDate}
+            onChange={(event) => setInterruptDate(event.target.value)}
+          />
+        </label>
 
-            <label>
-              Ticket Number {interruptProject?.requiresTicket ? '(required)' : '(optional)'}
-              <input
-                value={interruptTicket}
-                required={Boolean(interruptProject?.requiresTicket)}
-                onChange={(event) => setInterruptTicket(event.target.value)}
-                placeholder="ABC-123"
-              />
-            </label>
-          </>
-        )}
+        <label>
+          Ticket Number {interruptProject?.requiresTicket ? '(required)' : '(optional)'}
+          <input
+            value={interruptTicket}
+            required={Boolean(interruptProject?.requiresTicket)}
+            onChange={(event) => setInterruptTicket(event.target.value)}
+            placeholder="123456"
+          />
+        </label>
 
         <button type="submit">Pause + Log Interruption</button>
         {interruptError && <p className="form-error">{interruptError}</p>}
