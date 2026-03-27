@@ -44,6 +44,8 @@ interface TimesheetState extends TimesheetSnapshot {
   addTask: (input: TaskInput) => Promise<string | null>
   addTimeToTask: (taskId: ID, deltaMs: number) => Promise<void>
   updateTask: (taskId: ID, update: TaskUpdate) => Promise<string | null>
+  finishTask: (taskId: ID) => Promise<void>
+  reopenTask: (taskId: ID) => Promise<void>
   deleteTask: (taskId: ID) => Promise<void>
   startTimer: (taskId: ID) => void
   pauseActiveTimer: () => Promise<void>
@@ -433,6 +435,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         taskDate: input.taskDate,
         ticketNumber: input.ticketNumber?.trim() || undefined,
         totalMs: Math.max(0, input.totalMs ?? 0),
+        completedAt: undefined,
         createdAt: now,
         updatedAt: now,
       }
@@ -534,6 +537,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
           taskDate: update.taskDate,
           ticketNumber: update.ticketNumber?.trim() || undefined,
           totalMs: Math.max(0, update.totalMs),
+          completedAt: currentTask.completedAt,
           updatedAt: now,
         }
 
@@ -570,6 +574,119 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
       persistCurrent(get())
       return null
+    },
+
+    finishTask: async (taskId) => {
+      const current = get()
+      const task = current.tasks.find((candidate) => candidate.id === taskId)
+      if (!task) {
+        return
+      }
+
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+
+      if (isDesktopApp()) {
+        const shouldPause = current.activeTimerTaskId === taskId
+
+        try {
+          let snapshot: TimesheetSnapshot | null = null
+
+          if (shouldPause) {
+            snapshot = await pauseActiveTimerRemote(now, nowIso)
+          }
+
+          const sourceTask =
+            snapshot?.tasks.find((candidate) => candidate.id === taskId) ?? task
+
+          const finishedTask: Task = {
+            ...sourceTask,
+            completedAt: nowIso,
+            updatedAt: nowIso,
+          }
+
+          const updatedSnapshot = await updateTaskRemote(finishedTask)
+          set(() => ({
+            ...applySnapshotState(updatedSnapshot),
+            recoveryMessage: recoveryMessageForSnapshot(updatedSnapshot),
+          }))
+          saveSnapshot(updatedSnapshot)
+        } catch {
+          return
+        }
+
+        return
+      }
+
+      set((state) => ({
+        activeTimerTaskId:
+          state.activeTimerTaskId === taskId ? null : state.activeTimerTaskId,
+        activeTimerStartedAt:
+          state.activeTimerTaskId === taskId ? null : state.activeTimerStartedAt,
+        tasks: state.tasks.map((candidate) => {
+          if (candidate.id !== taskId) {
+            return candidate
+          }
+
+          const elapsed =
+            state.activeTimerTaskId === taskId && state.activeTimerStartedAt
+              ? Math.max(0, now - state.activeTimerStartedAt)
+              : 0
+
+          return {
+            ...candidate,
+            totalMs: candidate.totalMs + elapsed,
+            completedAt: nowIso,
+            updatedAt: nowIso,
+          }
+        }),
+      }))
+
+      persistCurrent(get())
+    },
+
+    reopenTask: async (taskId) => {
+      const task = get().tasks.find((candidate) => candidate.id === taskId)
+      if (!task || !task.completedAt) {
+        return
+      }
+
+      const nowIso = new Date().toISOString()
+
+      if (isDesktopApp()) {
+        try {
+          const reopenedTask: Task = {
+            ...task,
+            completedAt: undefined,
+            updatedAt: nowIso,
+          }
+
+          const snapshot = await updateTaskRemote(reopenedTask)
+          set(() => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
+          }))
+          saveSnapshot(snapshot)
+        } catch {
+          return
+        }
+
+        return
+      }
+
+      set((state) => ({
+        tasks: state.tasks.map((candidate) =>
+          candidate.id === taskId
+            ? {
+              ...candidate,
+              completedAt: undefined,
+              updatedAt: nowIso,
+            }
+            : candidate,
+        ),
+      }))
+
+      persistCurrent(get())
     },
 
     deleteTask: async (taskId) => {
@@ -765,6 +882,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
     getRecentTasks: (limit = 3) => {
       return [...get().tasks]
+        .filter((task) => !task.completedAt)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(0, limit)
     },

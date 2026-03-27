@@ -12,6 +12,7 @@ CREATE TABLE tasks (
   description TEXT NOT NULL,
   task_date TEXT NOT NULL,
   total_ms INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT,
   ticket_number TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

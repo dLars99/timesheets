@@ -10,6 +10,7 @@ export function TimerPanel() {
   const activeTimerStartedAt = useTimesheetStore((state) => state.activeTimerStartedAt)
   const startTimer = useTimesheetStore((state) => state.startTimer)
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
+  const finishTask = useTimesheetStore((state) => state.finishTask)
   const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
   const addProject = useTimesheetStore((state) => state.addProject)
   const addTask = useTimesheetStore((state) => state.addTask)
@@ -51,16 +52,20 @@ export function TimerPanel() {
   }, [activeTask, activeTimerStartedAt, tick])
 
   const recentTasks = getRecentTasks(3)
+  const openTasks = useMemo(
+    () => tasks.filter((task) => !task.completedAt),
+    [tasks],
+  )
 
   useEffect(() => {
     if (!interruptProjectId && projects[0]) {
       setInterruptProjectId(projects[0].id)
     }
 
-    if (!targetTaskId && tasks[0]) {
-      setTargetTaskId(tasks[0].id)
+    if (!targetTaskId && openTasks[0]) {
+      setTargetTaskId(openTasks[0].id)
     }
-  }, [projects, tasks, interruptProjectId, targetTaskId])
+  }, [projects, openTasks, interruptProjectId, targetTaskId])
 
   const interruptProject = useMemo(
     () => projects.find((project) => project.id === interruptProjectId),
@@ -129,9 +134,21 @@ export function TimerPanel() {
         <p className="label">Current Task</p>
         <h3>{activeTask?.description ?? 'No active timer'}</h3>
         <p className="timer-value">{activeDuration}</p>
-        <button onClick={activeTask ? pauseActiveTimer : undefined} disabled={!activeTask}>
-          Pause Active Timer
-        </button>
+        <div className="timer-actions">
+          <button
+            className="secondary-button"
+            onClick={activeTask ? pauseActiveTimer : undefined}
+            disabled={!activeTask}
+          >
+            Pause Active Timer
+          </button>
+          <button
+            onClick={() => (activeTask ? void finishTask(activeTask.id) : undefined)}
+            disabled={!activeTask}
+          >
+            Finish Active Task
+          </button>
+        </div>
       </div>
 
       <div>
@@ -196,7 +213,7 @@ export function TimerPanel() {
               value={targetTaskId}
               onChange={(event) => setTargetTaskId(event.target.value)}
             >
-              {tasks.map((task) => (
+              {openTasks.map((task) => (
                 <option key={task.id} value={task.id}>
                   {task.description}
                 </option>

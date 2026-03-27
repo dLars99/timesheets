@@ -257,6 +257,12 @@ button:disabled {
   margin: 0.15rem 0 0.7rem;
 }
 
+.timer-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .recent-grid {
   display: grid;
   gap: 0.55rem;
@@ -284,6 +290,18 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.8rem;
+}
+
+.task-card-history {
+  background: #f8fafc;
+}
+
+.history-heading {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .task-card-header {

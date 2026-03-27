@@ -26,6 +26,7 @@ struct PersistedTask {
   description: String,
   task_date: String,
   total_ms: i64,
+  completed_at: Option<String>,
   ticket_number: Option<String>,
   created_at: String,
   updated_at: String,
@@ -98,6 +99,25 @@ fn table_exists(conn: &Connection, table_name: &str) -> Result<bool, String> {
   Ok(exists > 0)
 }
 
+fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> Result<bool, String> {
+  let mut stmt = conn
+    .prepare(&format!("PRAGMA table_info({table_name})"))
+    .map_err(|err| format!("failed to inspect sqlite table columns: {err}"))?;
+
+  let rows = stmt
+    .query_map([], |row| row.get::<_, String>(1))
+    .map_err(|err| format!("failed to query sqlite table columns: {err}"))?;
+
+  for row in rows {
+    let name = row.map_err(|err| format!("failed to read sqlite column name: {err}"))?;
+    if name == column_name {
+      return Ok(true);
+    }
+  }
+
+  Ok(false)
+}
+
 fn migrate_legacy_app_state(conn: &Connection) -> Result<(), String> {
   if !table_exists(conn, "app_state")? {
     return Ok(());
@@ -167,6 +187,12 @@ fn init_db(conn: &Connection) -> Result<(), String> {
   conn
     .execute_batch(&init_sql_idempotent)
     .map_err(|err| format!("failed to initialize sqlite schema: {err}"))?;
+
+  if !column_exists(conn, "tasks", "completed_at")? {
+    conn
+      .execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT", [])
+      .map_err(|err| format!("failed to add completed_at column to tasks: {err}"))?;
+  }
 
   migrate_legacy_app_state(conn)?;
 
@@ -343,7 +369,7 @@ fn load_snapshot(
 
   let mut task_stmt = conn
     .prepare(
-      "SELECT id, project_id, description, task_date, total_ms, ticket_number, created_at, updated_at
+      "SELECT id, project_id, description, task_date, total_ms, completed_at, ticket_number, created_at, updated_at
        FROM tasks ORDER BY task_date, updated_at",
     )
     .map_err(|err| format!("failed to prepare task query: {err}"))?;
@@ -356,9 +382,10 @@ fn load_snapshot(
         description: row.get(2)?,
         task_date: row.get(3)?,
         total_ms: row.get(4)?,
-        ticket_number: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        completed_at: row.get(5)?,
+        ticket_number: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
       })
     })
     .map_err(|err| format!("failed to load tasks: {err}"))?;
@@ -438,14 +465,15 @@ fn write_snapshot(app: &tauri::AppHandle, snapshot: &PersistedSnapshot) -> Resul
   for task in snapshot.tasks.iter() {
     tx
       .execute(
-        "INSERT INTO tasks (id, project_id, description, task_date, total_ms, ticket_number, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO tasks (id, project_id, description, task_date, total_ms, completed_at, ticket_number, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
           task.id,
           task.project_id,
           task.description,
           task.task_date,
           task.total_ms,
+          task.completed_at,
           task.ticket_number,
           task.created_at,
           task.updated_at,

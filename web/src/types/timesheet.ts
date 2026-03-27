@@ -15,6 +15,7 @@ export interface Task {
   taskDate: string
   ticketNumber?: string
   totalMs: number
+  completedAt?: string
   createdAt: string
   updatedAt: string
 }
