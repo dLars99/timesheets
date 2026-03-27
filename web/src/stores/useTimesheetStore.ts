@@ -26,6 +26,7 @@ interface TaskInput {
   taskDate: string
   ticketNumber?: string
   totalMs?: number
+  completedAt?: string
 }
 
 interface TaskUpdate {
@@ -435,7 +436,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         taskDate: input.taskDate,
         ticketNumber: input.ticketNumber?.trim() || undefined,
         totalMs: Math.max(0, input.totalMs ?? 0),
-        completedAt: undefined,
+        completedAt: input.completedAt,
         createdAt: now,
         updatedAt: now,
       }

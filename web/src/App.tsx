@@ -173,7 +173,7 @@ function App() {
       <header className="hero">
         <div>
           <p className="eyebrow">Timesheets</p>
-          <h1>Track work without friction</h1>
+          <h1>More work. Less Excel.</h1>
           <p className="subtitle">
             Local-first tracking with quick task switching, summary reporting, and
             CSV export.

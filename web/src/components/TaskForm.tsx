@@ -10,6 +10,8 @@ interface TaskFormProps {
   onDone?: () => void
 }
 
+type NewTaskMode = 'start-now' | 'completed'
+
 export function TaskForm({ task, onDone }: TaskFormProps) {
   const projects = useTimesheetStore((state) => state.projects)
   const addTask = useTimesheetStore((state) => state.addTask)
@@ -20,6 +22,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
   const [description, setDescription] = useState(task?.description ?? '')
   const [projectId, setProjectId] = useState(task?.projectId ?? projects[0]?.id ?? '')
   const [newProjectName, setNewProjectName] = useState('')
+  const [newTaskMode, setNewTaskMode] = useState<NewTaskMode>('start-now')
   const [taskDate, setTaskDate] = useState(
     task?.taskDate ?? format(new Date(), 'yyyy-MM-dd'),
   )
@@ -34,8 +37,13 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
     [projects, projectId],
   )
   const isOtherProject = !task && projectId === OTHER_PROJECT_ID
+  const isCompletedMode = !task && newTaskMode === 'completed'
 
-  const submitLabel = task ? 'Save Changes' : 'Start Task'
+  const submitLabel = task
+    ? 'Save Changes'
+    : isCompletedMode
+      ? 'Save Completed Task'
+      : 'Start Task'
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -92,30 +100,38 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         projectId: resolvedProjectId,
         taskDate,
         ticketNumber,
+        totalMs: isCompletedMode
+          ? Math.max(0, Number.isFinite(Number(totalHours)) ? Number(totalHours) * 3600000 : 0)
+          : undefined,
+        completedAt: isCompletedMode ? new Date().toISOString() : undefined,
       })
       if (result) {
         setError(result)
         return
       }
 
-      // Task descriptions are unique per project/date, so this identifies
-      // the task just created and starts timing immediately.
-      const normalizedDescription = description.trim().toLowerCase()
-      const createdTask = [...useTimesheetStore.getState().tasks]
-        .filter((candidate) =>
-          candidate.projectId === resolvedProjectId &&
-          candidate.taskDate === taskDate &&
-          candidate.description.trim().toLowerCase() === normalizedDescription,
-        )
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+      if (!isCompletedMode) {
+        // Task descriptions are unique per project/date, so this identifies
+        // the task just created and starts timing immediately.
+        const normalizedDescription = description.trim().toLowerCase()
+        const createdTask = [...useTimesheetStore.getState().tasks]
+          .filter((candidate) =>
+            candidate.projectId === resolvedProjectId &&
+            candidate.taskDate === taskDate &&
+            candidate.description.trim().toLowerCase() === normalizedDescription,
+          )
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
 
-      if (createdTask) {
-        startTimer(createdTask.id)
+        if (createdTask) {
+          startTimer(createdTask.id)
+        }
       }
 
       setDescription('')
       setTicketNumber('')
       setNewProjectName('')
+      setTotalHours('0.00')
+      setNewTaskMode('start-now')
     }
 
     onDone?.()
@@ -123,6 +139,27 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
 
   return (
     <form className="task-form" onSubmit={handleSubmit}>
+      {!task && (
+        <div className="segment-control" role="group" aria-label="New task mode">
+          <button
+            type="button"
+            className={newTaskMode === 'start-now' ? 'segment-option active' : 'segment-option'}
+            aria-pressed={newTaskMode === 'start-now'}
+            onClick={() => setNewTaskMode('start-now')}
+          >
+            Start with timer
+          </button>
+          <button
+            type="button"
+            className={newTaskMode === 'completed' ? 'segment-option active' : 'segment-option'}
+            aria-pressed={newTaskMode === 'completed'}
+            onClick={() => setNewTaskMode('completed')}
+          >
+            Enter completed task
+          </button>
+        </div>
+      )}
+
       <label>
         Description
         <input
@@ -180,7 +217,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         />
       </label>
 
-      {task && (
+      {(task || isCompletedMode) && (
         <label>
           Total Hours
           <input
