@@ -12,14 +12,10 @@ export function TimerPanel() {
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
   const finishTask = useTimesheetStore((state) => state.finishTask)
   const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
-  const addProject = useTimesheetStore((state) => state.addProject)
   const addTask = useTimesheetStore((state) => state.addTask)
   const addTimeToTask = useTimesheetStore((state) => state.addTimeToTask)
 
   const [tick, setTick] = useState(Date.now())
-  const [projectName, setProjectName] = useState('')
-  const [requiresTicket, setRequiresTicket] = useState(false)
-  const [projectError, setProjectError] = useState<string | null>(null)
   const [interruptMode, setInterruptMode] = useState<'new' | 'existing'>('new')
   const [interruptMinutes, setInterruptMinutes] = useState('5')
   const [interruptDate, setInterruptDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -71,20 +67,6 @@ export function TimerPanel() {
     () => projects.find((project) => project.id === interruptProjectId),
     [projects, interruptProjectId],
   )
-
-  const handleAddProject = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setProjectError(null)
-
-    const error = await addProject(projectName, requiresTicket)
-    if (error) {
-      setProjectError(error)
-      return
-    }
-
-    setProjectName('')
-    setRequiresTicket(false)
-  }
 
   const handleLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -267,25 +249,6 @@ export function TimerPanel() {
 
         <button type="submit">Pause + Log Interruption</button>
         {interruptError && <p className="form-error">{interruptError}</p>}
-      </form>
-
-      <form className="inline-form" onSubmit={handleAddProject}>
-        <p className="label">Add User Project</p>
-        <input
-          value={projectName}
-          onChange={(event) => setProjectName(event.target.value)}
-          placeholder="Project name"
-        />
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={requiresTicket}
-            onChange={(event) => setRequiresTicket(event.target.checked)}
-          />
-          Requires ticket number
-        </label>
-        <button type="submit">Add Project</button>
-        {projectError && <p className="form-error">{projectError}</p>}
       </form>
     </div>
   )
