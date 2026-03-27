@@ -14,9 +14,11 @@ export function TimerPanel() {
   const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
   const addTask = useTimesheetStore((state) => state.addTask)
 
-  const [tick, setTick] = useState(Date.now())
+  const [tick, setTick] = useState(() => Date.now())
   const [interruptMinutes, setInterruptMinutes] = useState('5')
-  const [interruptDate, setInterruptDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [interruptDate, setInterruptDate] = useState(() =>
+    format(new Date(), 'yyyy-MM-dd'),
+  )
   const [interruptDescription, setInterruptDescription] = useState('Unexpected interruption')
   const [interruptProjectId, setInterruptProjectId] = useState('')
   const [interruptTicket, setInterruptTicket] = useState('')
@@ -46,15 +48,11 @@ export function TimerPanel() {
 
   const recentTasks = getRecentTasks(3)
 
-  useEffect(() => {
-    if (!interruptProjectId && projects[0]) {
-      setInterruptProjectId(projects[0].id)
-    }
-  }, [projects, interruptProjectId])
+  const effectiveInterruptProjectId = interruptProjectId || projects[0]?.id || ''
 
   const interruptProject = useMemo(
-    () => projects.find((project) => project.id === interruptProjectId),
-    [projects, interruptProjectId],
+    () => projects.find((project) => project.id === effectiveInterruptProjectId),
+    [projects, effectiveInterruptProjectId],
   )
 
   const handleLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -75,7 +73,7 @@ export function TimerPanel() {
 
     const result = await addTask({
       description: interruptDescription,
-      projectId: interruptProjectId,
+      projectId: effectiveInterruptProjectId,
       taskDate: interruptDate,
       ticketNumber: interruptTicket,
       totalMs: durationMs,
@@ -90,7 +88,7 @@ export function TimerPanel() {
     const normalizedDescription = interruptDescription.trim().toLowerCase()
     const createdTask = [...useTimesheetStore.getState().tasks]
       .filter((task) =>
-        task.projectId === interruptProjectId &&
+        task.projectId === effectiveInterruptProjectId &&
         task.taskDate === interruptDate &&
         task.description.trim().toLowerCase() === normalizedDescription,
       )
@@ -172,7 +170,7 @@ export function TimerPanel() {
         <label>
           Project
           <select
-            value={interruptProjectId}
+            value={effectiveInterruptProjectId}
             onChange={(event) => setInterruptProjectId(event.target.value)}
           >
             {projects.map((project) => (

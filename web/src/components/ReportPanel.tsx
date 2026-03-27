@@ -16,8 +16,9 @@ export function ReportPanel() {
   const [startDate, setStartDate] = useState(defaultDate)
   const [endDate, setEndDate] = useState(defaultDate)
   const [ipcTotals, setIpcTotals] = useState<ProjectTotalRow[] | null>(null)
-  const [loadingIpc, setLoadingIpc] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const isDateRangeValid = startDate <= endDate
+  const loadingIpc = isDateRangeValid && ipcTotals === null
 
   const filteredTasks = useMemo(
     () =>
@@ -26,7 +27,7 @@ export function ReportPanel() {
   )
 
   const totals = useMemo(() => {
-    if (ipcTotals) {
+    if (isDateRangeValid && ipcTotals) {
       return ipcTotals
     }
 
@@ -43,16 +44,14 @@ export function ReportPanel() {
         totalMs,
       }))
       .sort((a, b) => a.projectName.localeCompare(b.projectName))
-  }, [filteredTasks, ipcTotals, projects])
+  }, [filteredTasks, ipcTotals, isDateRangeValid, projects])
 
   useEffect(() => {
-    if (startDate > endDate) {
-      setIpcTotals(null)
+    if (!isDateRangeValid) {
       return
     }
 
     let cancelled = false
-    setLoadingIpc(true)
 
     void fetchProjectTotals(startDate, endDate)
       .then((rows) => {
@@ -61,16 +60,11 @@ export function ReportPanel() {
         }
         setIpcTotals(rows)
       })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingIpc(false)
-        }
-      })
 
     return () => {
       cancelled = true
     }
-  }, [startDate, endDate, tasks])
+  }, [startDate, endDate, isDateRangeValid, tasks])
 
   const totalHours = useMemo(
     () => toDecimalHours(filteredTasks.reduce((sum, task) => sum + task.totalMs, 0)),
@@ -102,7 +96,10 @@ export function ReportPanel() {
           <input
             type="date"
             value={startDate}
-            onChange={(event) => setStartDate(event.target.value)}
+            onChange={(event) => {
+              setStartDate(event.target.value)
+              setIpcTotals(null)
+            }}
           />
         </label>
         <label>
@@ -110,7 +107,10 @@ export function ReportPanel() {
           <input
             type="date"
             value={endDate}
-            onChange={(event) => setEndDate(event.target.value)}
+            onChange={(event) => {
+              setEndDate(event.target.value)
+              setIpcTotals(null)
+            }}
           />
         </label>
         <button
@@ -121,7 +121,7 @@ export function ReportPanel() {
         </button>
       </div>
 
-      {startDate > endDate && (
+      {!isDateRangeValid && (
         <p className="form-error">Start date must be before or equal to end date.</p>
       )}
       {loadingIpc && <p className="empty-state">Refreshing totals...</p>}
