@@ -46,7 +46,7 @@ interface TimesheetState extends TimesheetSnapshot {
   updateTask: (taskId: ID, update: TaskUpdate) => Promise<string | null>
   deleteTask: (taskId: ID) => Promise<void>
   startTimer: (taskId: ID) => void
-  pauseActiveTimer: () => void
+  pauseActiveTimer: () => Promise<void>
   adjustTaskTime: (taskId: ID, totalMs: number) => void
   confirmRecovery: () => Promise<void>
   discardRecovery: () => Promise<void>
@@ -636,20 +636,21 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       persistCurrent(get())
     },
 
-    pauseActiveTimer: () => {
+    pauseActiveTimer: async () => {
       if (isDesktopApp()) {
         const now = Date.now()
         const nowIso = new Date(now).toISOString()
 
-        void pauseActiveTimerRemote(now, nowIso)
-          .then((snapshot) => {
-            set(() => ({
-              ...applySnapshotState(snapshot),
-              recoveryMessage: recoveryMessageForSnapshot(snapshot),
-            }))
-            saveSnapshot(snapshot)
-          })
-          .catch(() => undefined)
+        try {
+          const snapshot = await pauseActiveTimerRemote(now, nowIso)
+          set(() => ({
+            ...applySnapshotState(snapshot),
+            recoveryMessage: recoveryMessageForSnapshot(snapshot),
+          }))
+          saveSnapshot(snapshot)
+        } catch {
+          // Silently fail for consistency with original behavior
+        }
         return
       }
 

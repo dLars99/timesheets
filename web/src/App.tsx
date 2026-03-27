@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
+import { isTauri } from '@tauri-apps/api/core'
 import './App.css'
 import { ReportPanel } from './components/ReportPanel'
 import { TaskForm } from './components/TaskForm'
@@ -7,7 +8,17 @@ import { TaskList } from './components/TaskList'
 import { TimerPanel } from './components/TimerPanel'
 import { useTimesheetStore } from './stores/useTimesheetStore'
 
+type CloseEventLike = {
+  preventDefault: () => void
+}
+
+type AppWindowLike = {
+  onCloseRequested: (handler: (event: CloseEventLike) => void) => Promise<() => void>
+  close: () => Promise<void>
+}
+
 function App() {
+  const isDesktop = isTauri()
   const hydrate = useTimesheetStore((state) => state.hydrate)
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
   const activeTimerTaskId = useTimesheetStore((state) => state.activeTimerTaskId)
@@ -16,18 +27,43 @@ function App() {
   const discardRecovery = useTimesheetStore((state) => state.discardRecovery)
   const tasks = useTimesheetStore((state) => state.tasks)
   const [activeView, setActiveView] = useState<'today' | 'report'>('today')
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
+  const [closeError, setCloseError] = useState<string | null>(null)
+  const activeTimerTaskIdRef = useRef(activeTimerTaskId)
+  const allowCloseRef = useRef(false)
+  const appWindowRef = useRef<AppWindowLike | undefined>(undefined)
+
+  const getAppWindow = async (): Promise<AppWindowLike> => {
+    if (appWindowRef.current) {
+      return appWindowRef.current
+    }
+
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const appWindow = getCurrentWindow() as unknown as AppWindowLike
+    appWindowRef.current = appWindow
+    return appWindow
+  }
+
+  useEffect(() => {
+    activeTimerTaskIdRef.current = activeTimerTaskId
+  }, [activeTimerTaskId])
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
 
   useEffect(() => {
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (isDesktop) {
+      return undefined
+    }
+
+    const onBeforeUnload = async (event: BeforeUnloadEvent) => {
       if (!activeTimerTaskId) {
         return undefined
       }
 
-      pauseActiveTimer()
+      await pauseActiveTimer()
 
       const message = 'You have an active timer. Closing now will pause it.'
       event.preventDefault()
@@ -39,41 +75,89 @@ function App() {
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload)
     }
-  }, [activeTimerTaskId, pauseActiveTimer])
+  }, [activeTimerTaskId, isDesktop, pauseActiveTimer])
 
   useEffect(() => {
-    if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) {
+    if (!isDesktop) {
       return undefined
     }
 
-    let unlisten: (() => void) | null = null
+    let disposed = false
+    let localUnlisten: (() => void) | undefined
 
     void (async () => {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      unlisten = await getCurrentWindow().onCloseRequested((event) => {
-        if (!activeTimerTaskId) {
+      const appWindow = await getAppWindow()
+
+      const unlisten = await appWindow.onCloseRequested((event) => {
+        // If we've been explicitly told to close, allow it
+        if (allowCloseRef.current) {
           return
         }
 
-        const shouldClose = window.confirm(
-          'A timer is currently running. Close the app and pause the timer?',
-        )
-
-        if (!shouldClose) {
+        // If timer is running, intercept and show confirmation
+        if (activeTimerTaskIdRef.current) {
           event.preventDefault()
-          return
+          setCloseError(null)
+          setShowCloseConfirm(true)
         }
-
-        pauseActiveTimer()
+        // Otherwise, allow close to proceed normally
       })
+
+      // React Strict Mode can unmount before async listener setup resolves.
+      // If that happened, immediately detach this listener.
+      if (disposed) {
+        unlisten()
+        return
+      }
+
+      localUnlisten = unlisten
     })()
 
     return () => {
-      if (unlisten) {
-        unlisten()
+      disposed = true
+      if (localUnlisten) {
+        localUnlisten()
       }
     }
-  }, [activeTimerTaskId, pauseActiveTimer])
+  }, [isDesktop])
+
+  const confirmCloseWithTimer = async () => {
+    if (!isDesktop) {
+      return
+    }
+
+    setIsClosing(true)
+    setCloseError(null)
+
+    try {
+      // Allow the next close request to pass through immediately and avoid
+      // stale active-timer state blocking the programmatic close.
+      allowCloseRef.current = true
+      activeTimerTaskIdRef.current = null
+
+      await pauseActiveTimer()
+
+      const appWindow = await getAppWindow()
+      await appWindow.close()
+
+      setShowCloseConfirm(false)
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Failed to close app.'
+      setCloseError(message)
+      setIsClosing(false)
+      allowCloseRef.current = false
+    }
+  }
+
+  const cancelCloseWithTimer = () => {
+    setCloseError(null)
+    setShowCloseConfirm(false)
+  }
 
   const today = format(new Date(), 'yyyy-MM-dd')
   const todayTotalMs = useMemo(() => {
@@ -106,6 +190,40 @@ function App() {
           </div>
         </div>
       </header>
+
+      {showCloseConfirm && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="close-modal-title"
+          >
+            <h2 id="close-modal-title">Close app with active timer?</h2>
+            <p>
+              Closing now will pause the running timer and save elapsed time.
+            </p>
+            {closeError && <p className="form-error">{closeError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={cancelCloseWithTimer}
+                disabled={isClosing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmCloseWithTimer()}
+                disabled={isClosing}
+              >
+                {isClosing ? 'Closing...' : 'Pause and close'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {recoveryMessage && (
         <aside className="recovery-banner">
