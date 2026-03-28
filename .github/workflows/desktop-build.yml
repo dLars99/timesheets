@@ -59,7 +59,7 @@ jobs:
 
       - name: Deep sign app bundle (macOS)
         if: matrix.os == 'macos-latest'
-        run: codesign --force --deep --sign - ../src-tauri/target/release/bundle/macos/Timesheets.app
+        run: codesign --force --deep --sign - ./src-tauri/target/release/bundle/macos/Timesheets.app
 
       - name: Build desktop bundles (Windows)
         if: matrix.os == 'windows-latest'
