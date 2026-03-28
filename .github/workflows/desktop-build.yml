@@ -8,6 +8,10 @@ on:
 
 jobs:
   build-desktop:
+    permissions:
+      id-token: write
+      contents: read
+
     strategy:
       fail-fast: false
       matrix:
@@ -47,8 +51,41 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build desktop bundles
+      - name: Build desktop bundles (macOS)
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
         run: pnpm tauri:build
+
+      - name: Deep sign app bundle (macOS)
+        if: matrix.os == 'macos-latest'
+        run: codesign --force --deep --sign - ../src-tauri/target/release/bundle/macos/Timesheets.app
+
+      - name: Build desktop bundles (Windows)
+        if: matrix.os == 'windows-latest'
+        run: pnpm tauri:build
+
+      - name: Azure login (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows artifacts
+        if: matrix.os == 'windows-latest'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\\web\\src-tauri\\target\\release\\bundle
+          files-folder-filter: exe,msi
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
@@ -58,6 +95,7 @@ jobs:
           path: |
             web/src-tauri/target/release/bundle/dmg/*.dmg
             web/src-tauri/target/release/bundle/macos/*.app
+            scripts/install-mac.sh
           if-no-files-found: warn
 
       - name: Upload Windows artifacts
