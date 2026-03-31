@@ -52,7 +52,7 @@ interface TimesheetState extends TimesheetSnapshot {
   adjustTaskTime: (taskId: ID, totalMs: number) => void
   confirmRecovery: () => Promise<void>
   discardRecovery: () => Promise<void>
-  getRecentTasks: (limit?: number) => Task[]
+  getRecentTasks: (limit?: number, includeCompleted?: boolean) => Task[]
 }
 
 function saveSnapshot(snapshot: TimesheetSnapshot): void {
@@ -880,11 +880,16 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       persistCurrent(get())
     },
 
-    getRecentTasks: (limit = 3) => {
+    getRecentTasks: (limit = 3, includeCompleted = false) => {
+      const safeLimit = Math.min(limit, 100)
       return [...get().tasks]
-        .filter((task) => !task.completedAt)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, limit)
+        .filter((task) => includeCompleted || !task.completedAt)
+        .sort((a, b) => {
+          const byUpdated = b.updatedAt.localeCompare(a.updatedAt)
+          if (byUpdated !== 0) return byUpdated
+          return b.taskDate.localeCompare(a.taskDate)
+        })
+        .slice(0, safeLimit)
     },
   }
 
