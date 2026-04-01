@@ -13,6 +13,15 @@ interface TaskFormProps {
 
 type NewTaskMode = 'start-now' | 'completed'
 
+function hoursInputToMilliseconds(value: string): number {
+  const parsedHours = Number(value)
+  if (!Number.isFinite(parsedHours)) {
+    return 0
+  }
+
+  return Math.max(0, Math.round(parsedHours * 3600000))
+}
+
 export function TaskForm({ task, onDone }: TaskFormProps) {
   const projects = useTimesheetStore((state) => state.projects)
   const addTask = useTimesheetStore((state) => state.addTask)
@@ -53,13 +62,12 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
     setError(null)
 
     if (task) {
-      const parsedHours = Number(totalHours)
       const result = await updateTask(task.id, {
         description,
         projectId,
         taskDate,
         ticketNumber,
-        totalMs: Number.isFinite(parsedHours) ? parsedHours * 3600000 : 0,
+        totalMs: hoursInputToMilliseconds(totalHours),
       })
 
       if (result) {
@@ -104,7 +112,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         taskDate,
         ticketNumber,
         totalMs: isCompletedMode
-          ? Math.max(0, Number.isFinite(Number(totalHours)) ? Number(totalHours) * 3600000 : 0)
+          ? hoursInputToMilliseconds(totalHours)
           : undefined,
         completedAt: isCompletedMode ? new Date().toISOString() : undefined,
       })
@@ -229,7 +237,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
           <input
             type="number"
             min="0"
-            step="0.25"
+            step="0.01"
             value={totalHours}
             onChange={(event) => setTotalHours(event.target.value)}
           />

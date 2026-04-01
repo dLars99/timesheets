@@ -75,16 +75,14 @@ export function TaskList() {
                 )}
 
                 <div className="task-actions">
-                  {!isCompleted && (
-                    <button
-                      className="icon-btn"
-                      title="Edit"
-                      aria-label="Edit task"
-                      onClick={() => setEditingTaskId(task.id)}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                  )}
+                  <button
+                    className="icon-btn"
+                    title="Edit"
+                    aria-label="Edit task"
+                    onClick={() => setEditingTaskId(task.id)}
+                  >
+                    <Pencil size={16} />
+                  </button>
                   {!isCompleted && (
                     <button
                       className="icon-btn"

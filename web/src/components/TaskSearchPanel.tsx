@@ -147,16 +147,14 @@ export function TaskSearchPanel() {
                   {isCompleted ? 'Finished' : isActive ? 'Running' : 'Paused'}
                 </span>
                 <div className="task-actions">
-                  {!isCompleted && (
-                    <button
-                      className="icon-btn"
-                      title="Edit"
-                      aria-label="Edit task"
-                      onClick={() => setEditingTaskId(row.id)}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                  )}
+                  <button
+                    className="icon-btn"
+                    title="Edit"
+                    aria-label="Edit task"
+                    onClick={() => setEditingTaskId(row.id)}
+                  >
+                    <Pencil size={15} />
+                  </button>
                   {!isCompleted && (
                     <button
                       className="icon-btn"
