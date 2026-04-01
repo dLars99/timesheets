@@ -56,8 +56,7 @@ export function TimerPanel() {
     [projects, effectiveInterruptProjectId],
   )
 
-  const handleLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const logInterruption = async (shouldPauseActiveTimer: boolean) => {
     setInterruptError(null)
 
     const minutes = Number(interruptMinutes)
@@ -68,7 +67,7 @@ export function TimerPanel() {
 
     const durationMs = minutes * 60000
 
-    if (activeTask) {
+    if (shouldPauseActiveTimer && activeTask) {
       await pauseActiveTimer()
     }
 
@@ -103,6 +102,15 @@ export function TimerPanel() {
     setInterruptTicket('')
   }
 
+  const handlePauseAndLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    await logInterruption(true)
+  }
+
+  const handleLogInterruption = async () => {
+    await logInterruption(false)
+  }
+
   return (
     <div className="timer-panel">
       <div className="timer-current">
@@ -127,7 +135,7 @@ export function TimerPanel() {
       </div>
 
       <div>
-        <p className="label">Recent Tasks</p>
+        <p className="label">Recent Tasks<span>- Click a Task to Resume</span></p>
         <div className="recent-grid">
           {recentTasks.map((task) => {
             const project = projects.find((item) => item.id === task.projectId)
@@ -146,7 +154,7 @@ export function TimerPanel() {
         </div>
       </div>
 
-      <form className="inline-form" onSubmit={handleLogInterruption}>
+      <form className="inline-form" onSubmit={handlePauseAndLogInterruption}>
         <p className="label">Log Interruption</p>
 
         <label>
@@ -200,7 +208,14 @@ export function TimerPanel() {
           />
         </label>
 
-        <button type="submit">Pause + Log Interruption</button>
+        <div className="interruption-actions">
+          <button type="button" onClick={() => void handleLogInterruption()}>
+            Log Interruption
+          </button>
+          <button type="submit" className="secondary-button">
+            Pause + Log Interruption
+          </button>
+        </div>
         {interruptError && <p className="form-error">{interruptError}</p>}
       </form>
     </div>
