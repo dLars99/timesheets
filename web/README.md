@@ -1,3 +1,6 @@
+🤖 Made with clankers 🤖
+_Clank responsibly._
+
 # React + TypeScript + Vite
 
 ## Test Seed Data (Desktop Debug Only)
