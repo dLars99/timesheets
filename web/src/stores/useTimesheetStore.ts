@@ -75,13 +75,13 @@ function recoveryMessageForSnapshot(snapshot: Pick<
   return `Recovered ${taskName} as paused from previous session.`
 }
 
-function toErrorMessage(error: unknown, fallback: string): string {
+function extractErrorMessage(error: unknown): string | null {
   if (typeof error === 'string' && error.trim()) {
-    return error
+    return error.trim()
   }
 
   if (error instanceof Error && error.message.trim()) {
-    return error.message
+    return error.message.trim()
   }
 
   if (
@@ -94,6 +94,56 @@ function toErrorMessage(error: unknown, fallback: string): string {
     if (message) {
       return message
     }
+  }
+
+  return null
+}
+
+function friendlyErrorMessage(rawMessage: string, fallback: string): string {
+  const normalized = rawMessage.toLowerCase()
+
+  if (
+    normalized.includes('invalid args') &&
+    normalized.includes('expected i64')
+  ) {
+    return 'The time value could not be saved. Check Total Hours and try again.'
+  }
+
+  if (
+    normalized.includes('unique constraint failed') ||
+    normalized.includes('tasks_project_date_description_unique')
+  ) {
+    return 'A matching task already exists for this project and date.'
+  }
+
+  if (normalized.includes('selected project no longer exists')) {
+    return 'The selected project is no longer available. Choose another project and try again.'
+  }
+
+  if (normalized.includes('requires a ticket number')) {
+    return rawMessage
+  }
+
+  if (
+    normalized.includes('invalid type') ||
+    normalized.includes('serde') ||
+    normalized.includes('json')
+  ) {
+    return 'The app could not process this save request. Review the form values and try again.'
+  }
+
+  if (normalized.includes('database') || normalized.includes('sqlite')) {
+    return 'The app could not save your changes right now. Please try again.'
+  }
+
+  return fallback
+}
+
+function toErrorMessage(error: unknown, fallback: string): string {
+  const rawMessage = extractErrorMessage(error)
+  if (rawMessage) {
+    console.error('Timesheets operation failed:', error)
+    return friendlyErrorMessage(rawMessage, fallback)
   }
 
   return fallback
@@ -147,6 +197,14 @@ function persistCurrent(state: TimesheetState): void {
     recoveryElapsedMs: state.recoveryElapsedMs,
     recoveryBaseTotalMs: state.recoveryBaseTotalMs,
   })
+}
+
+function normalizeTotalMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return 0
+  }
+
+  return Math.max(0, Math.round(value))
 }
 
 function applySnapshotState(snapshot: TimesheetSnapshot) {
@@ -434,7 +492,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
         projectId: input.projectId,
         taskDate: input.taskDate,
         ticketNumber: input.ticketNumber?.trim() || undefined,
-        totalMs: Math.max(0, input.totalMs ?? 0),
+        totalMs: normalizeTotalMs(input.totalMs),
         completedAt: input.completedAt,
         createdAt: now,
         updatedAt: now,
@@ -523,6 +581,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       }
 
       const now = new Date().toISOString()
+      const normalizedTotalMs = normalizeTotalMs(update.totalMs)
 
       if (isDesktopApp()) {
         const currentTask = get().tasks.find((task) => task.id === taskId)
@@ -536,7 +595,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
           projectId: update.projectId,
           taskDate: update.taskDate,
           ticketNumber: update.ticketNumber?.trim() || undefined,
-          totalMs: Math.max(0, update.totalMs),
+          totalMs: normalizedTotalMs,
           completedAt: currentTask.completedAt,
           updatedAt: now,
         }
@@ -566,7 +625,7 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
             projectId: update.projectId,
             taskDate: update.taskDate,
             ticketNumber: update.ticketNumber?.trim() || undefined,
-            totalMs: Math.max(0, update.totalMs),
+            totalMs: normalizedTotalMs,
             updatedAt: now,
           }
         }),
