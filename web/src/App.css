@@ -192,6 +192,69 @@ select {
   background: #fff;
 }
 
+.date-input {
+  position: relative;
+}
+
+.date-input-field {
+  width: 100%;
+}
+
+.date-input-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.65rem;
+  box-shadow: 0 18px 40px rgba(12, 24, 41, 0.18);
+}
+
+.date-input-popover .rdp {
+  --rdp-accent-color: #113154;
+  --rdp-accent-background-color: #edf3fb;
+  --rdp-day_button-border-radius: 8px;
+  --rdp-day-width: 2.2rem;
+  --rdp-day-height: 2.2rem;
+  --rdp-nav_button-width: 2rem;
+  --rdp-nav_button-height: 2rem;
+  margin: 0;
+}
+
+.date-input-popover .rdp-months {
+  display: block;
+}
+
+.date-input-popover .rdp-month {
+  background: transparent;
+}
+
+.date-input-popover .rdp-caption_label,
+.date-input-popover .rdp-dropdown {
+  font: inherit;
+  color: var(--text);
+}
+
+.date-input-popover .rdp-button_previous,
+.date-input-popover .rdp-button_next {
+  background: transparent;
+  border: 0;
+  color: #113154;
+  padding: 0;
+}
+
+.date-input-popover .rdp-day_button {
+  border: 0;
+  color: var(--text);
+}
+
+.date-input-popover .rdp-today:not(.rdp-selected) .rdp-day_button {
+  border: 1px solid #d5e3f6;
+  background: #f6f9ff;
+}
+
 button {
   border: 1px solid #113154;
   background: #113154;

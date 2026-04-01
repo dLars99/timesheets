@@ -4,6 +4,7 @@ import { CheckCircle, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-reac
 import { fetchTasksForRange, type TaskSearchRow } from '../lib/reportingIpc'
 import { formatDuration, toDecimalHours } from '../lib/time'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
+import { DateInput } from './DateInput'
 import { TaskForm } from './TaskForm'
 import type { ID } from '../types/timesheet'
 
@@ -84,18 +85,16 @@ export function TaskSearchPanel() {
       <div className="report-controls">
         <label>
           Start
-          <input
-            type="date"
+          <DateInput
             value={startDate}
-            onChange={(e) => handleStartChange(e.target.value)}
+            onChange={handleStartChange}
           />
         </label>
         <label>
           End
-          <input
-            type="date"
+          <DateInput
             value={endDate}
-            onChange={(e) => handleEndChange(e.target.value)}
+            onChange={handleEndChange}
           />
         </label>
       </div>

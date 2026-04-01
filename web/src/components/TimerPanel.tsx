@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { formatDuration } from '../lib/time'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
+import { DateInput } from './DateInput'
 
 export function TimerPanel() {
   const tasks = useTimesheetStore((state) => state.tasks)
@@ -183,10 +184,9 @@ export function TimerPanel() {
 
         <label>
           Date
-          <input
-            type="date"
+          <DateInput
             value={interruptDate}
-            onChange={(event) => setInterruptDate(event.target.value)}
+            onChange={setInterruptDate}
           />
         </label>
 

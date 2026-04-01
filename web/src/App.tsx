@@ -245,19 +245,19 @@ function App() {
           className={activeView === 'today' ? 'active' : ''}
           onClick={() => setActiveView('today')}
         >
-          Tasks
+          Task Tracker
+        </button>
+        <button
+          className={activeView === 'search' ? 'active' : ''}
+          onClick={() => setActiveView('search')}
+        >
+          Search Past Tasks
         </button>
         <button
           className={activeView === 'report' ? 'active' : ''}
           onClick={() => setActiveView('report')}
         >
           Reports
-        </button>
-        <button
-          className={activeView === 'search' ? 'active' : ''}
-          onClick={() => setActiveView('search')}
-        >
-          Task Search
         </button>
       </nav>
 
@@ -274,7 +274,7 @@ function App() {
           </div>
 
           <div className="panel panel-wide">
-            <h2>Task List</h2>
+            <h2>Recent Tasks</h2>
             <TaskList />
           </div>
         </section>
@@ -288,7 +288,7 @@ function App() {
       ) : (
         <section className="workspace-grid single-column">
           <div className="panel panel-wide">
-            <h2>Task Search</h2>
+            <h2>Search Past Tasks</h2>
             <TaskSearchPanel />
           </div>
         </section>
