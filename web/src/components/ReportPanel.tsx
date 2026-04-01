@@ -8,6 +8,7 @@ import {
 } from '../lib/reportingIpc'
 import { toDecimalHours } from '../lib/time'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
+import { DateInput } from './DateInput'
 
 export function ReportPanel() {
   const tasks = useTimesheetStore((state) => state.tasks)
@@ -93,22 +94,20 @@ export function ReportPanel() {
       <div className="report-controls">
         <label>
           Start
-          <input
-            type="date"
+          <DateInput
             value={startDate}
-            onChange={(event) => {
-              setStartDate(event.target.value)
+            onChange={(value) => {
+              setStartDate(value)
               setIpcTotals(null)
             }}
           />
         </label>
         <label>
           End
-          <input
-            type="date"
+          <DateInput
             value={endDate}
-            onChange={(event) => {
-              setEndDate(event.target.value)
+            onChange={(value) => {
+              setEndDate(value)
               setIpcTotals(null)
             }}
           />

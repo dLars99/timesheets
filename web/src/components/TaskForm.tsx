@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
 import type { Task } from '../types/timesheet'
+import { DateInput } from './DateInput'
 
 const OTHER_PROJECT_ID = '__other_project__'
 
@@ -205,11 +206,10 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
 
       <label>
         Date
-        <input
-          type="date"
+        <DateInput
           required
           value={taskDate}
-          onChange={(event) => setTaskDate(event.target.value)}
+          onChange={setTaskDate}
         />
       </label>
 

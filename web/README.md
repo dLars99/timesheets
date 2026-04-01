@@ -1,5 +1,28 @@
 # React + TypeScript + Vite
 
+## Test Seed Data (Desktop Debug Only)
+
+You can enable a one-time sample dataset of 20 tasks for scale testing in desktop debug runs.
+
+- Guarded to debug builds only.
+- Requires explicit environment flag.
+- Release builds ignore this flag and start with no seeded tasks.
+
+Run with seed enabled:
+
+```bash
+cd web
+TIMESHEETS_SEED_SAMPLE_TASKS=1 pnpm tauri:dev
+```
+
+Reset local desktop DB if you want to reseed from scratch:
+
+```bash
+rm -f "$HOME/.local/share/timesheets/timesheets.db"
+```
+
+Sample task IDs use prefix `seed-task-` and are inserted idempotently.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

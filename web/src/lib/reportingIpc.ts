@@ -58,3 +58,34 @@ export async function fetchExportRows(
     return null
   }
 }
+
+export interface TaskSearchRow {
+  id: string
+  taskDate: string
+  description: string
+  projectId: string
+  projectName: string
+  ticketNumber: string | null
+  totalMs: number
+  completedAt: string | null
+}
+
+export async function fetchTasksForRange(
+  startDate: string,
+  endDate: string,
+): Promise<TaskSearchRow[] | null> {
+  if (!isDesktop()) {
+    return null
+  }
+
+  try {
+    const rows = await invoke<TaskSearchRow[]>('get_tasks_for_range', {
+      startDate,
+      endDate,
+    })
+    return rows
+  } catch (error) {
+    console.error('Failed to load task rows from desktop IPC', error)
+    return null
+  }
+}

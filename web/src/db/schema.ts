@@ -29,6 +29,7 @@ export const tasks = sqliteTable(
     description: text('description').notNull(),
     taskDate: text('task_date').notNull(),
     totalMs: integer('total_ms').notNull().default(0),
+    completedAt: text('completed_at'),
     ticketNumber: text('ticket_number'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),

@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import { CheckCircle, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { formatDuration, toDecimalHours } from '../lib/time'
+import { useViewportLimit } from '../lib/useViewportLimit'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
 import type { ID } from '../types/timesheet'
 import { TaskForm } from './TaskForm'
@@ -19,7 +21,6 @@ function formatFinishedAt(iso?: string): string {
 }
 
 export function TaskList() {
-  const tasks = useTimesheetStore((state) => state.tasks)
   const projects = useTimesheetStore((state) => state.projects)
   const deleteTask = useTimesheetStore((state) => state.deleteTask)
   const startTimer = useTimesheetStore((state) => state.startTimer)
@@ -27,71 +28,104 @@ export function TaskList() {
   const finishTask = useTimesheetStore((state) => state.finishTask)
   const reopenTask = useTimesheetStore((state) => state.reopenTask)
   const activeTimerTaskId = useTimesheetStore((state) => state.activeTimerTaskId)
+  const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
   const [editingTaskId, setEditingTaskId] = useState<ID | null>(null)
 
-  const projectById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project])),
-    [projects],
-  )
+  const limit = useViewportLimit()
+  const recentTasks = getRecentTasks(limit, true)
 
-  const sortedTasks = [...tasks].sort((a, b) => {
-    if (a.taskDate === b.taskDate) {
-      return b.updatedAt.localeCompare(a.updatedAt)
-    }
-    return b.taskDate.localeCompare(a.taskDate)
-  })
+  const projectById = new Map(projects.map((project) => [project.id, project]))
 
-  const openTasks = sortedTasks.filter((task) => !task.completedAt)
-  const historyTasks = sortedTasks.filter((task) => Boolean(task.completedAt))
-
-  if (sortedTasks.length === 0) {
+  if (recentTasks.length === 0) {
     return <p className="empty-state">No tasks yet. Add one to get started.</p>
   }
 
   return (
     <div className="task-list">
-      {openTasks.map((task) => {
+      {recentTasks.map((task) => {
         const project = projectById.get(task.projectId)
         const isActive = task.id === activeTimerTaskId
         const isEditing = task.id === editingTaskId
+        const isCompleted = Boolean(task.completedAt)
 
         return (
-          <article key={task.id} className="task-card">
+          <article key={task.id} className={`task-card${isCompleted ? ' task-card-history' : ''}`}>
             {isEditing ? (
               <TaskForm task={task} onDone={() => setEditingTaskId(null)} />
             ) : (
               <>
                 <div className="task-card-header">
-                  <h3>{task.description}</h3>
+                  <h3 title={task.description}>{task.description}</h3>
                   <span className={isActive ? 'status running' : 'status'}>
-                    {isActive ? 'Running' : 'Paused'}
+                    {isCompleted ? 'Finished' : isActive ? 'Running' : 'Paused'}
                   </span>
                 </div>
 
                 <p className="task-meta">
                   {task.taskDate} | {project?.name ?? 'Unknown project'}
-                  {task.ticketNumber ? ` | Ticket: ${task.ticketNumber}` : ''}
+                  {task.ticketNumber ? ` | ${task.ticketNumber}` : ''}
                 </p>
 
                 <p className="task-total">
                   {formatDuration(task.totalMs)} ({toDecimalHours(task.totalMs)} h)
                 </p>
 
+                {isCompleted && (
+                  <p className="task-meta">Finished: {formatFinishedAt(task.completedAt)}</p>
+                )}
+
                 <div className="task-actions">
-                  <button onClick={() => setEditingTaskId(task.id)}>Edit</button>
-                  <button onClick={() => (isActive ? pauseActiveTimer() : startTimer(task.id))}>
-                    {isActive ? 'Pause' : 'Start'}
-                  </button>
-                  <button onClick={() => void finishTask(task.id)}>Finish</button>
+                  {!isCompleted && (
+                    <button
+                      className="icon-btn"
+                      title="Edit"
+                      aria-label="Edit task"
+                      onClick={() => setEditingTaskId(task.id)}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  )}
+                  {!isCompleted && (
+                    <button
+                      className="icon-btn"
+                      title={isActive ? 'Pause' : 'Start'}
+                      aria-label={isActive ? 'Pause timer' : 'Start timer'}
+                      onClick={() => (isActive ? pauseActiveTimer() : startTimer(task.id))}
+                    >
+                      {isActive ? <Pause size={16} /> : <Play size={16} />}
+                    </button>
+                  )}
+                  {!isCompleted && (
+                    <button
+                      className="icon-btn"
+                      title="Finish"
+                      aria-label="Finish task"
+                      onClick={() => void finishTask(task.id)}
+                    >
+                      <CheckCircle size={16} />
+                    </button>
+                  )}
+                  {isCompleted && (
+                    <button
+                      className="icon-btn"
+                      title="Reopen"
+                      aria-label="Reopen task"
+                      onClick={() => void reopenTask(task.id)}
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                  )}
                   <button
-                    className="danger"
+                    className="icon-btn danger"
+                    title="Delete"
+                    aria-label="Delete task"
                     onClick={async () => {
                       if (window.confirm('Delete this task?')) {
                         await deleteTask(task.id)
                       }
                     }}
                   >
-                    Delete
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </>
@@ -99,46 +133,7 @@ export function TaskList() {
           </article>
         )
       })}
-
-      {historyTasks.length > 0 && <h3 className="history-heading">History</h3>}
-
-      {historyTasks.map((task) => {
-        const project = projectById.get(task.projectId)
-
-        return (
-          <article key={task.id} className="task-card task-card-history">
-            <div className="task-card-header">
-              <h3>{task.description}</h3>
-              <span className="status">Finished</span>
-            </div>
-
-            <p className="task-meta">
-              {task.taskDate} | {project?.name ?? 'Unknown project'}
-              {task.ticketNumber ? ` | Ticket: ${task.ticketNumber}` : ''}
-            </p>
-
-            <p className="task-total">
-              {formatDuration(task.totalMs)} ({toDecimalHours(task.totalMs)} h)
-            </p>
-
-            <p className="task-meta">Finished: {formatFinishedAt(task.completedAt)}</p>
-
-            <div className="task-actions">
-              <button onClick={() => void reopenTask(task.id)}>Reopen</button>
-              <button
-                className="danger"
-                onClick={async () => {
-                  if (window.confirm('Delete this task?')) {
-                    await deleteTask(task.id)
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </article>
-        )
-      })}
     </div>
   )
 }
+

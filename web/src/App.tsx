@@ -5,6 +5,7 @@ import './App.css'
 import { ReportPanel } from './components/ReportPanel'
 import { TaskForm } from './components/TaskForm'
 import { TaskList } from './components/TaskList'
+import { TaskSearchPanel } from './components/TaskSearchPanel'
 import { TimerPanel } from './components/TimerPanel'
 import { useTimesheetStore } from './stores/useTimesheetStore'
 
@@ -26,7 +27,7 @@ function App() {
   const confirmRecovery = useTimesheetStore((state) => state.confirmRecovery)
   const discardRecovery = useTimesheetStore((state) => state.discardRecovery)
   const tasks = useTimesheetStore((state) => state.tasks)
-  const [activeView, setActiveView] = useState<'today' | 'report'>('today')
+  const [activeView, setActiveView] = useState<'today' | 'report' | 'search'>('today')
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [isClosing, setIsClosing] = useState(false)
   const [closeError, setCloseError] = useState<string | null>(null)
@@ -244,7 +245,13 @@ function App() {
           className={activeView === 'today' ? 'active' : ''}
           onClick={() => setActiveView('today')}
         >
-          Tasks
+          Task Tracker
+        </button>
+        <button
+          className={activeView === 'search' ? 'active' : ''}
+          onClick={() => setActiveView('search')}
+        >
+          Search Past Tasks
         </button>
         <button
           className={activeView === 'report' ? 'active' : ''}
@@ -267,15 +274,22 @@ function App() {
           </div>
 
           <div className="panel panel-wide">
-            <h2>Task List</h2>
+            <h2>Recent Tasks</h2>
             <TaskList />
+          </div>
+        </section>
+      ) : activeView === 'report' ? (
+        <section className="workspace-grid single-column">
+          <div className="panel panel-wide">
+            <h2>Project Totals</h2>
+            <ReportPanel />
           </div>
         </section>
       ) : (
         <section className="workspace-grid single-column">
           <div className="panel panel-wide">
-            <h2>Project Totals</h2>
-            <ReportPanel />
+            <h2>Search Past Tasks</h2>
+            <TaskSearchPanel />
           </div>
         </section>
       )}

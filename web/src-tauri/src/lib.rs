@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 const INIT_SQL: &str = include_str!("../../src/db/migrations/0001_init.sql");
+const SEED_PROJECTS_SQL: &str = include_str!("../../src/db/migrations/0002_seed_projects.sql");
+const SEED_SAMPLE_TASKS_SQL: &str = include_str!("../../src/db/migrations/0003_seed_sample_tasks.sql");
+const ADD_TASK_DATE_INDEX_SQL: &str = include_str!("../../src/db/migrations/0004_add_task_date_index.sql");
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +63,19 @@ struct ExportRow {
   description: String,
   ticket_number: String,
   hours: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskSearchRow {
+  id: String,
+  task_date: String,
+  description: String,
+  project_id: String,
+  project_name: String,
+  ticket_number: Option<String>,
+  total_ms: i64,
+  completed_at: Option<String>,
 }
 
 fn state_dir_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -172,6 +188,46 @@ fn migrate_legacy_app_state(conn: &Connection) -> Result<(), String> {
   Ok(())
 }
 
+fn should_seed_sample_tasks() -> bool {
+  if !cfg!(debug_assertions) {
+    return false;
+  }
+
+  match std::env::var("TIMESHEETS_SEED_SAMPLE_TASKS") {
+    Ok(value) => {
+      let normalized = value.trim().to_ascii_lowercase();
+      normalized == "1" || normalized == "true" || normalized == "yes"
+    }
+    Err(_) => false,
+  }
+}
+
+fn seed_sample_tasks(conn: &Connection) -> Result<(), String> {
+  let already_seeded: i64 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM tasks WHERE id LIKE 'seed-task-%'",
+      [],
+      |row| row.get(0),
+    )
+    .map_err(|err| format!("failed to check sample task seed state: {err}"))?;
+
+  if already_seeded > 0 {
+    return Ok(());
+  }
+
+  let projects_seed_idempotent = SEED_PROJECTS_SQL.replace("INSERT INTO", "INSERT OR IGNORE INTO");
+
+  conn
+    .execute_batch(&projects_seed_idempotent)
+    .map_err(|err| format!("failed to seed test projects: {err}"))?;
+
+  conn
+    .execute_batch(SEED_SAMPLE_TASKS_SQL)
+    .map_err(|err| format!("failed to seed test tasks: {err}"))?;
+
+  Ok(())
+}
+
 fn init_db(conn: &Connection) -> Result<(), String> {
   conn
     .execute_batch("PRAGMA foreign_keys = ON;")
@@ -194,6 +250,14 @@ fn init_db(conn: &Connection) -> Result<(), String> {
   }
 
   migrate_legacy_app_state(conn)?;
+
+  conn
+    .execute_batch(ADD_TASK_DATE_INDEX_SQL)
+    .map_err(|err| format!("failed to apply task_date index migration: {err}"))?;
+
+  if should_seed_sample_tasks() {
+    seed_sample_tasks(conn)?;
+  }
 
   conn
     .execute_batch(
@@ -928,6 +992,58 @@ fn get_export_rows(
   Ok(rows)
 }
 
+#[tauri::command]
+fn get_tasks_for_range(
+  app: tauri::AppHandle,
+  start_date: String,
+  end_date: String,
+) -> Result<Vec<TaskSearchRow>, String> {
+  if start_date > end_date {
+    return Err("start date must be before or equal to end date".to_string());
+  }
+
+  let Some(snapshot) = load_snapshot(&app, false)? else {
+    return Ok(Vec::new());
+  };
+
+  let names_by_id: HashMap<String, String> = snapshot
+    .projects
+    .iter()
+    .map(|p| (p.id.clone(), p.name.clone()))
+    .collect();
+
+  let mut in_range: Vec<&PersistedTask> = snapshot
+    .tasks
+    .iter()
+    .filter(|task| task.task_date >= start_date && task.task_date <= end_date)
+    .collect();
+
+  in_range.sort_by(|a, b| {
+    b.task_date
+      .cmp(&a.task_date)
+      .then(b.updated_at.cmp(&a.updated_at))
+  });
+
+  let rows = in_range
+    .iter()
+    .map(|task| TaskSearchRow {
+      id: task.id.clone(),
+      task_date: task.task_date.clone(),
+      description: task.description.clone(),
+      project_id: task.project_id.clone(),
+      project_name: names_by_id
+        .get(&task.project_id)
+        .cloned()
+        .unwrap_or_else(|| "Unknown".to_string()),
+      ticket_number: task.ticket_number.clone(),
+      total_ms: task.total_ms.max(0),
+      completed_at: task.completed_at.clone(),
+    })
+    .collect();
+
+  Ok(rows)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -954,7 +1070,8 @@ pub fn run() {
       confirm_recovery,
       discard_recovery,
       get_project_totals,
-      get_export_rows
+      get_export_rows,
+      get_tasks_for_range
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
