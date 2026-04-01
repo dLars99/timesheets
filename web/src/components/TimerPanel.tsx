@@ -13,7 +13,7 @@ export function TimerPanel() {
   const pauseActiveTimer = useTimesheetStore((state) => state.pauseActiveTimer)
   const finishTask = useTimesheetStore((state) => state.finishTask)
   const getRecentTasks = useTimesheetStore((state) => state.getRecentTasks)
-  const addTask = useTimesheetStore((state) => state.addTask)
+  const logInterruption = useTimesheetStore((state) => state.logInterruption)
 
   const [tick, setTick] = useState(() => Date.now())
   const [interruptMinutes, setInterruptMinutes] = useState('5')
@@ -35,17 +35,22 @@ export function TimerPanel() {
     [tasks, activeTimerTaskId],
   )
 
-  const activeDuration = useMemo(() => {
+  const activeDurationMs = useMemo(() => {
     if (!activeTask) {
-      return '00:00:00'
+      return 0
     }
 
     if (!activeTimerStartedAt) {
-      return formatDuration(activeTask.totalMs)
+      return activeTask.totalMs
     }
 
-    return formatDuration(activeTask.totalMs + Math.max(0, tick - activeTimerStartedAt))
+    return activeTask.totalMs + Math.max(0, tick - activeTimerStartedAt)
   }, [activeTask, activeTimerStartedAt, tick])
+
+  const activeDuration = useMemo(
+    () => formatDuration(activeDurationMs),
+    [activeDurationMs],
+  )
 
   const recentTasks = getRecentTasks(3)
 
@@ -56,8 +61,7 @@ export function TimerPanel() {
     [projects, effectiveInterruptProjectId],
   )
 
-  const handleLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const submitInterruption = async (shouldPauseActiveTimer: boolean) => {
     setInterruptError(null)
 
     const minutes = Number(interruptMinutes)
@@ -66,18 +70,24 @@ export function TimerPanel() {
       return
     }
 
-    const durationMs = minutes * 60000
-
-    if (activeTask) {
-      await pauseActiveTimer()
+    if (!activeTask) {
+      setInterruptError('An active task is required to log an interruption.')
+      return
     }
 
-    const result = await addTask({
+    const durationMs = Math.round(minutes * 60000)
+    if (durationMs > activeDurationMs) {
+      setInterruptError('Interruption minutes cannot exceed the current task time.')
+      return
+    }
+
+    const result = await logInterruption({
       description: interruptDescription,
       projectId: effectiveInterruptProjectId,
       taskDate: interruptDate,
       ticketNumber: interruptTicket,
-      totalMs: durationMs,
+      durationMs,
+      pauseActiveTimer: shouldPauseActiveTimer,
     })
 
     if (result) {
@@ -85,22 +95,17 @@ export function TimerPanel() {
       return
     }
 
-    // New interruption tasks are immediately moved to history after logging.
-    const normalizedDescription = interruptDescription.trim().toLowerCase()
-    const createdTask = [...useTimesheetStore.getState().tasks]
-      .filter((task) =>
-        task.projectId === effectiveInterruptProjectId &&
-        task.taskDate === interruptDate &&
-        task.description.trim().toLowerCase() === normalizedDescription,
-      )
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-
-    if (createdTask) {
-      await finishTask(createdTask.id)
-    }
-
     setInterruptDescription('Unexpected interruption')
     setInterruptTicket('')
+  }
+
+  const handlePauseAndLogInterruption = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    await submitInterruption(true)
+  }
+
+  const handleLogInterruption = async () => {
+    await submitInterruption(false)
   }
 
   return (
@@ -127,7 +132,7 @@ export function TimerPanel() {
       </div>
 
       <div>
-        <p className="label">Recent Tasks</p>
+        <p className="label">Recent Tasks<span>- Click a Task to Resume</span></p>
         <div className="recent-grid">
           {recentTasks.map((task) => {
             const project = projects.find((item) => item.id === task.projectId)
@@ -146,7 +151,7 @@ export function TimerPanel() {
         </div>
       </div>
 
-      <form className="inline-form" onSubmit={handleLogInterruption}>
+      <form className="inline-form" onSubmit={handlePauseAndLogInterruption}>
         <p className="label">Log Interruption</p>
 
         <label>
@@ -156,6 +161,7 @@ export function TimerPanel() {
             min="1"
             step="1"
             value={interruptMinutes}
+            aria-invalid={Boolean(interruptError)}
             onChange={(event) => setInterruptMinutes(event.target.value)}
           />
         </label>
@@ -200,7 +206,14 @@ export function TimerPanel() {
           />
         </label>
 
-        <button type="submit">Pause + Log Interruption</button>
+        <div className="interruption-actions">
+          <button type="button" onClick={() => void handleLogInterruption()}>
+            Log Interruption
+          </button>
+          <button type="submit" className="secondary-button">
+            Pause + Log Interruption
+          </button>
+        </div>
         {interruptError && <p className="form-error">{interruptError}</p>}
       </form>
     </div>

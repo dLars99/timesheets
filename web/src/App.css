@@ -350,6 +350,16 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.interruption-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.interruption-actions button {
+  flex: 1 1 220px;
+}
+
 .recent-grid {
   display: grid;
   gap: 0.55rem;

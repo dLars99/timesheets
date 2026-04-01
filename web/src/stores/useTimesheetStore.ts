@@ -36,12 +36,22 @@ interface TaskUpdate {
   totalMs: number
 }
 
+interface InterruptionInput {
+  description: string
+  projectId: ID
+  taskDate: string
+  ticketNumber?: string
+  durationMs: number
+  pauseActiveTimer: boolean
+}
+
 interface TimesheetState extends TimesheetSnapshot {
   recoveryMessage: string | null
   isHydrated: boolean
   hydrate: () => Promise<void>
   addProject: (name: string, requiresTicket: boolean) => Promise<string | null>
   addTask: (input: TaskInput) => Promise<string | null>
+  logInterruption: (input: InterruptionInput) => Promise<string | null>
   addTimeToTask: (taskId: ID, deltaMs: number) => Promise<void>
   updateTask: (taskId: ID, update: TaskUpdate) => Promise<string | null>
   finishTask: (taskId: ID) => Promise<void>
@@ -205,6 +215,23 @@ function normalizeTotalMs(value: number | undefined): number {
   }
 
   return Math.max(0, Math.round(value))
+}
+
+function getLiveTaskTotalMs(
+  state: Pick<TimesheetState, 'tasks' | 'activeTimerTaskId' | 'activeTimerStartedAt'>,
+  taskId: ID,
+  now: number,
+): number {
+  const task = state.tasks.find((candidate) => candidate.id === taskId)
+  if (!task) {
+    return 0
+  }
+
+  if (state.activeTimerTaskId !== taskId || state.activeTimerStartedAt === null) {
+    return task.totalMs
+  }
+
+  return task.totalMs + Math.max(0, now - state.activeTimerStartedAt)
 }
 
 function applySnapshotState(snapshot: TimesheetSnapshot) {
@@ -514,6 +541,94 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
 
       set((state) => ({ tasks: [...state.tasks, task] }))
       persistCurrent(get())
+      return null
+    },
+
+    logInterruption: async (input) => {
+      const state = get()
+      const activeTaskId = state.activeTimerTaskId
+
+      if (!activeTaskId) {
+        return 'An active task is required to log an interruption.'
+      }
+
+      const activeTask = state.tasks.find((task) => task.id === activeTaskId)
+      if (!activeTask) {
+        return 'An active task is required to log an interruption.'
+      }
+
+      const description = input.description.trim()
+      if (!description) {
+        return 'Task description is required.'
+      }
+
+      if (
+        hasDuplicateTask(state.tasks, description, input.projectId, input.taskDate)
+      ) {
+        return 'A matching task already exists for this project and date.'
+      }
+
+      const validationError = withProjectValidation(
+        state.projects,
+        input.projectId,
+        input.ticketNumber,
+      )
+      if (validationError) {
+        return validationError
+      }
+
+      const durationMs = normalizeTotalMs(input.durationMs)
+      if (durationMs <= 0) {
+        return 'Interruption minutes must be greater than zero.'
+      }
+
+      const now = Date.now()
+      const currentActiveTotalMs = getLiveTaskTotalMs(state, activeTaskId, now)
+      if (durationMs > currentActiveTotalMs) {
+        return 'Interruption minutes cannot exceed the current task time.'
+      }
+
+      const nowIso = new Date(now).toISOString()
+      const interruptionTask: Task = {
+        id: `task-${crypto.randomUUID()}`,
+        description,
+        projectId: input.projectId,
+        taskDate: input.taskDate,
+        ticketNumber: input.ticketNumber?.trim() || undefined,
+        totalMs: durationMs,
+        completedAt: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      }
+
+      const nextTasks = state.tasks.map((task) => {
+        if (task.id !== activeTaskId) {
+          return task
+        }
+
+        return {
+          ...task,
+          totalMs: currentActiveTotalMs - durationMs,
+          updatedAt: nowIso,
+        }
+      })
+
+      const nextSnapshot: TimesheetSnapshot = {
+        projects: state.projects,
+        tasks: [...nextTasks, interruptionTask],
+        activeTimerTaskId: input.pauseActiveTimer ? null : activeTaskId,
+        activeTimerStartedAt: input.pauseActiveTimer ? null : now,
+        recoveryTaskId: null,
+        recoveryElapsedMs: null,
+        recoveryBaseTotalMs: null,
+      }
+
+      set(() => ({
+        ...applySnapshotState(nextSnapshot),
+        recoveryMessage: null,
+      }))
+      saveSnapshot(nextSnapshot)
+
       return null
     },
 
