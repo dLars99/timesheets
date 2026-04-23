@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { format } from 'date-fns'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
 import type { Task } from '../types/timesheet'
@@ -44,10 +44,6 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
   )
   const [error, setError] = useState<string | null>(null)
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === projectId),
-    [projects, projectId],
-  )
   const isOtherProject = !task && projectId === OTHER_PROJECT_ID
   const isCompletedMode = !task && newTaskMode === 'completed'
 
@@ -222,10 +218,9 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
       </label>
 
       <label>
-        Ticket Number {selectedProject?.requiresTicket ? '(required)' : '(optional)'}
+        Ticket Number (optional)
         <input
           value={ticketNumber}
-          required={Boolean(selectedProject?.requiresTicket)}
           onChange={(event) => setTicketNumber(event.target.value)}
           placeholder="123456"
         />

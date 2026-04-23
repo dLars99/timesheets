@@ -597,13 +597,6 @@ fn validate_task_against_snapshot(
     .find(|project| project.id == task.project_id)
     .ok_or_else(|| "Selected project no longer exists.".to_string())?;
 
-  if project.requires_ticket {
-    let ticket = task.ticket_number.as_deref().unwrap_or("").trim();
-    if ticket.is_empty() {
-      return Err(format!("{} requires a ticket number.", project.name));
-    }
-  }
-
   let normalized = task.description.trim().to_lowercase();
   if normalized.is_empty() {
     return Err("Task description is required.".to_string());

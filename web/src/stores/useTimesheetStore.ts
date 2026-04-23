@@ -130,10 +130,6 @@ function friendlyErrorMessage(rawMessage: string, fallback: string): string {
     return 'The selected project is no longer available. Choose another project and try again.'
   }
 
-  if (normalized.includes('requires a ticket number')) {
-    return rawMessage
-  }
-
   if (
     normalized.includes('invalid type') ||
     normalized.includes('serde') ||
@@ -162,15 +158,10 @@ function toErrorMessage(error: unknown, fallback: string): string {
 function withProjectValidation(
   projects: Project[],
   projectId: ID,
-  ticketNumber?: string,
 ): string | null {
   const project = projects.find((candidate) => candidate.id === projectId)
   if (!project) {
     return 'Selected project no longer exists.'
-  }
-
-  if (project.requiresTicket && !ticketNumber?.trim()) {
-    return `${project.name} requires a ticket number.`
   }
 
   return null
@@ -506,7 +497,6 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       const validationError = withProjectValidation(
         get().projects,
         input.projectId,
-        input.ticketNumber,
       )
       if (validationError) {
         return validationError
@@ -571,7 +561,6 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       const validationError = withProjectValidation(
         state.projects,
         input.projectId,
-        input.ticketNumber,
       )
       if (validationError) {
         return validationError
@@ -689,7 +678,6 @@ export const useTimesheetStore = create<TimesheetState>((set, get) => {
       const validationError = withProjectValidation(
         get().projects,
         update.projectId,
-        update.ticketNumber,
       )
       if (validationError) {
         return validationError

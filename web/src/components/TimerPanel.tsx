@@ -56,11 +56,6 @@ export function TimerPanel() {
 
   const effectiveInterruptProjectId = interruptProjectId || projects[0]?.id || ''
 
-  const interruptProject = useMemo(
-    () => projects.find((project) => project.id === effectiveInterruptProjectId),
-    [projects, effectiveInterruptProjectId],
-  )
-
   const submitInterruption = async (shouldPauseActiveTimer: boolean) => {
     setInterruptError(null)
 
@@ -197,10 +192,9 @@ export function TimerPanel() {
         </label>
 
         <label>
-          Ticket Number {interruptProject?.requiresTicket ? '(required)' : '(optional)'}
+          Ticket Number (optional)
           <input
             value={interruptTicket}
-            required={Boolean(interruptProject?.requiresTicket)}
             onChange={(event) => setInterruptTicket(event.target.value)}
             placeholder="123456"
           />
