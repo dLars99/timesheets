@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { formatDuration, toDecimalHours } from '../lib/time'
 import { useViewportLimit } from '../lib/useViewportLimit'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
+import { confirmDelete } from '../lib/dialogs'
 import type { ID } from '../types/timesheet'
 import { TaskForm } from './TaskForm'
 
@@ -118,7 +119,7 @@ export function TaskList() {
                     title="Delete"
                     aria-label="Delete task"
                     onClick={async () => {
-                      if (window.confirm('Delete this task?')) {
+                      if (await confirmDelete()) {
                         await deleteTask(task.id)
                       }
                     }}

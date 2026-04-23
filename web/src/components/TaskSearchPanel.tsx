@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { CheckCircle, Pause, Pencil, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { confirmDelete } from '../lib/dialogs'
 import { fetchTasksForRange, type TaskSearchRow } from '../lib/reportingIpc'
 import { formatDuration, toDecimalHours } from '../lib/time'
 import { useTimesheetStore } from '../stores/useTimesheetStore'
@@ -190,7 +191,7 @@ export function TaskSearchPanel() {
                     title="Delete"
                     aria-label="Delete task"
                     onClick={async () => {
-                      if (window.confirm('Delete this task?')) {
+                      if (await confirmDelete()) {
                         await deleteTask(row.id)
                       }
                     }}
