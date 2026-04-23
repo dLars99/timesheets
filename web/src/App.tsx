@@ -173,7 +173,7 @@ function App() {
     <main className="app-shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">Timesheets</p>
+          <p className="eyebrow">TimeCrunch</p>
           <h1>More work. Less Excel.</h1>
           <p className="subtitle">
             Local-first tracking with quick task switching, summary reporting, and
