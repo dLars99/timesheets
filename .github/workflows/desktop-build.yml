@@ -59,7 +59,7 @@ jobs:
 
       - name: Deep sign app bundle (macOS)
         if: matrix.os == 'macos-latest'
-        run: codesign --force --deep --sign - ./src-tauri/target/release/bundle/macos/Timesheets.app
+        run: codesign --force --deep --sign - ./src-tauri/target/release/bundle/macos/TimeCrunch.app
 
       - name: Build desktop bundles (Windows)
         if: matrix.os == 'windows-latest'
@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           mkdir -p ./artifacts/macos
           cp ./src-tauri/target/release/bundle/dmg/*.dmg ./artifacts/macos/
-          ditto -c -k --sequesterRsrc --keepParent ./src-tauri/target/release/bundle/macos/Timesheets.app ./artifacts/macos/Timesheets.app.zip
+          ditto -c -k --sequesterRsrc --keepParent ./src-tauri/target/release/bundle/macos/TimeCrunch.app ./artifacts/macos/TimeCrunch.app.zip
           cp ../scripts/install-mac.sh ./artifacts/macos/
 
       - name: Stage Windows artifacts
@@ -118,7 +118,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: timesheets-macos
+          name: timecrunch-macos
           path: web/artifacts/macos
           if-no-files-found: warn
 
@@ -126,6 +126,6 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: timesheets-windows
+          name: timecrunch-windows
           path: web/artifacts/windows
           if-no-files-found: warn
