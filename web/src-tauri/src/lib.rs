@@ -78,6 +78,26 @@ struct TaskSearchRow {
   completed_at: Option<String>,
 }
 
+fn migrate_app_data_dir(app: &tauri::AppHandle) {
+  let new_dir = match app.path().app_data_dir() {
+    Ok(p) => p,
+    Err(_) => return,
+  };
+
+  if new_dir.exists() {
+    return;
+  }
+
+  let old_dir = match new_dir.parent() {
+    Some(parent) => parent.join("Timesheets"),
+    None => return,
+  };
+
+  if old_dir.exists() {
+    let _ = fs::rename(&old_dir, &new_dir);
+  }
+}
+
 fn state_dir_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   let app_dir = app
     .path()
@@ -1042,6 +1062,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
+      migrate_app_data_dir(app.handle());
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
