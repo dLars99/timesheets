@@ -13,13 +13,13 @@ interface TaskFormProps {
 
 type NewTaskMode = 'start-now' | 'completed'
 
-function hoursInputToMilliseconds(value: string): number {
-  const parsedHours = Number(value)
-  if (!Number.isFinite(parsedHours)) {
+function minutesInputToMilliseconds(value: string): number {
+  const parsedMinutes = Number(value)
+  if (!Number.isFinite(parsedMinutes)) {
     return 0
   }
 
-  return Math.max(0, Math.round(parsedHours * 3600000))
+  return Math.max(0, Math.round(parsedMinutes * 60000))
 }
 
 export function TaskForm({ task, onDone }: TaskFormProps) {
@@ -39,8 +39,8 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
     task?.taskDate ?? format(new Date(), 'yyyy-MM-dd'),
   )
   const [ticketNumber, setTicketNumber] = useState(task?.ticketNumber ?? '')
-  const [totalHours, setTotalHours] = useState(
-    task ? (task.totalMs / 3600000).toFixed(2) : '0.00',
+  const [totalMinutes, setTotalMinutes] = useState(
+    task ? String(Math.round(task.totalMs / 60000)) : '0',
   )
   const [error, setError] = useState<string | null>(null)
 
@@ -67,7 +67,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         projectId,
         taskDate,
         ticketNumber,
-        totalMs: hoursInputToMilliseconds(totalHours),
+        totalMs: minutesInputToMilliseconds(totalMinutes),
       })
 
       if (result) {
@@ -112,7 +112,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
         taskDate,
         ticketNumber,
         totalMs: isCompletedMode
-          ? hoursInputToMilliseconds(totalHours)
+          ? minutesInputToMilliseconds(totalMinutes)
           : undefined,
         completedAt: isCompletedMode ? new Date().toISOString() : undefined,
       })
@@ -141,7 +141,7 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
       setDescription('')
       setTicketNumber('')
       setNewProjectName('')
-      setTotalHours('0.00')
+      setTotalMinutes('0')
       setNewTaskMode('start-now')
     }
 
@@ -233,13 +233,13 @@ export function TaskForm({ task, onDone }: TaskFormProps) {
 
       {(task || isCompletedMode) && (
         <label>
-          Total Hours
+          Total Minutes
           <input
             type="number"
             min="0"
-            step="0.01"
-            value={totalHours}
-            onChange={(event) => setTotalHours(event.target.value)}
+            step="1"
+            value={totalMinutes}
+            onChange={(event) => setTotalMinutes(event.target.value)}
           />
         </label>
       )}

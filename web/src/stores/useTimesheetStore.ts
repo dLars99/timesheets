@@ -116,7 +116,7 @@ function friendlyErrorMessage(rawMessage: string, fallback: string): string {
     normalized.includes('invalid args') &&
     normalized.includes('expected i64')
   ) {
-    return 'The time value could not be saved. Check Total Hours and try again.'
+    return 'The time value could not be saved. Check Total Minutes and try again.'
   }
 
   if (
