@@ -1,0 +1,5 @@
+.vscode/*
+!.vscode/extensions.json
+.claude/
+.vexp/
+.github/copilot-instructions.md

@@ -116,7 +116,7 @@ export function DateInput({ value, onChange, required, disabled, id }: DateInput
           <DayPicker
             mode="single"
             selected={selectedDate}
-            month={selectedDate}
+            defaultMonth={selectedDate}
             onSelect={(date) => {
               if (!date) {
                 return
